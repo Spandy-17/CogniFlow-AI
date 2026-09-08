@@ -104,6 +104,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 });
 
 import { ThemeProvider } from "../components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
@@ -145,6 +146,7 @@ function RootComponent() {
         <AuthProvider>
           {/* Required: nested routes render here. */}
           <Outlet />
+          <Toaster />
         </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>
