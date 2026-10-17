@@ -1,9 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AuthShell, Field, FormMessage, GoogleButton, PrimaryButton } from "@/components/AuthShell";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, MailCheck } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/signup")({
@@ -19,7 +18,7 @@ export const Route = createFileRoute("/signup")({
 
 function SignupPage() {
   const navigate = useNavigate();
-  const { session, signInAsDemo } = useAuth();
+  const { session } = useAuth();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -28,7 +27,10 @@ function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // When Supabase requires email confirmation, we show a success state instead of logging in
+  const [emailSent, setEmailSent] = useState(false);
 
+  // Redirect to dashboard if already logged in
   useEffect(() => {
     if (session) navigate({ to: "/dashboard", replace: true });
   }, [session, navigate]);
@@ -48,58 +50,83 @@ function SignupPage() {
     setLoading(true);
     const fullName = `${firstName} ${lastName}`.trim() || "Workspace Admin";
 
-    try {
-      const { data, error: supError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: window.location.origin,
-          data: {
-            first_name: firstName,
-            last_name: lastName,
-            full_name: fullName,
-          },
+    const { data, error: supError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/dashboard`,
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          full_name: fullName,
         },
-      });
+      },
+    });
 
-      if (!supError && data.session) {
-        setLoading(false);
-        navigate({ to: "/dashboard", replace: true });
-        return;
+    setLoading(false);
+
+    if (supError) {
+      // Handle known errors with friendly messages
+      if (supError.message.includes("already registered") || supError.message.includes("already exists")) {
+        setError("An account with this email already exists. Try signing in instead.");
+      } else {
+        setError(supError.message);
       }
-
-      // If backend fails or email confirmation is required, create account seamlessly locally
-      signInAsDemo(email, fullName);
-      setLoading(false);
-      navigate({ to: "/dashboard", replace: true });
-    } catch (err) {
-      signInAsDemo(email, fullName);
-      setLoading(false);
-      navigate({ to: "/dashboard", replace: true });
+      return;
     }
+
+    if (data.session) {
+      // Email confirmation is disabled in Supabase — user is immediately logged in
+      navigate({ to: "/dashboard", replace: true });
+      return;
+    }
+
+    // Email confirmation is required (Supabase default) — tell the user to check inbox
+    setEmailSent(true);
   };
 
   const onGoogle = async () => {
     setError(null);
     setGoogleLoading(true);
     try {
-      const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin,
+      const { error: supError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/dashboard`,
+        },
       });
-      if (result.error) {
-        signInAsDemo("google.user@cogniflow.ai", "Google Member");
+      if (supError) {
+        setError(supError.message || "Google sign-in failed. Please try again.");
         setGoogleLoading(false);
-        navigate({ to: "/dashboard", replace: true });
-        return;
       }
-      if (result.redirected) return;
-      navigate({ to: "/dashboard", replace: true });
     } catch (err) {
-      signInAsDemo("google.user@cogniflow.ai", "Google Member");
+      setError(err instanceof Error ? err.message : "Google sign-in failed. Please try again.");
       setGoogleLoading(false);
-      navigate({ to: "/dashboard", replace: true });
     }
   };
+
+  // Show success state when email confirmation is sent
+  if (emailSent) {
+    return (
+      <AuthShell
+        title="Check your inbox"
+        subtitle={`We sent a confirmation link to ${email}. Click it to activate your account.`}
+        footer={<>Wrong email? <button onClick={() => setEmailSent(false)} className="font-semibold text-primary hover:underline">Go back</button></>}
+      >
+        <div className="flex flex-col items-center gap-4 py-4">
+          <div className="grid size-16 place-items-center rounded-2xl bg-primary/10">
+            <MailCheck className="size-8 text-primary" />
+          </div>
+          <p className="text-center text-sm text-muted-foreground">
+            After confirming your email, you'll be redirected to your dashboard automatically.
+          </p>
+          <Link to="/login" className="text-sm font-semibold text-primary hover:underline">
+            Already confirmed? Sign in →
+          </Link>
+        </div>
+      </AuthShell>
+    );
+  }
 
   return (
     <AuthShell
