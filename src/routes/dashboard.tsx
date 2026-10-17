@@ -20,7 +20,22 @@ function ProtectedDashboard() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!loading && !session) navigate({ to: "/login", replace: true });
+    if (typeof window === "undefined") return;
+
+    // If OAuth failed with an error, forward to /login with the error details
+    if (window.location.search.includes("error=") || window.location.hash.includes("error=")) {
+      const err = window.location.search || window.location.hash;
+      window.location.href = `/login${err}`;
+      return;
+    }
+
+    const hasOAuthParams =
+      window.location.search.includes("code=") ||
+      window.location.hash.includes("access_token=");
+
+    if (!loading && !session && !hasOAuthParams) {
+      navigate({ to: "/login", replace: true });
+    }
   }, [loading, session, navigate]);
 
   if (loading || !session) {

@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { AuthShell, Field, FormMessage, GoogleButton, PrimaryButton } from "@/components/AuthShell";
 import { ArrowRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/login")({
@@ -19,61 +18,73 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const navigate = useNavigate();
-  const { session, signInAsDemo } = useAuth();
+  const { session } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Redirect to dashboard if already logged in
   useEffect(() => {
     if (session) navigate({ to: "/dashboard", replace: true });
   }, [session, navigate]);
+
+  // Capture any OAuth error returned in the URL
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const hash = window.location.hash.startsWith("#") ? window.location.hash.substring(1) : "";
+      const hashParams = new URLSearchParams(hash);
+      const searchParams = new URLSearchParams(window.location.search);
+      const err = hashParams.get("error_description") || searchParams.get("error_description");
+      if (err) {
+        setError(decodeURIComponent(err.replace(/\+/g, " ")));
+      }
+    }
+  }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const userName = email.split("@")[0] || "Workspace Member";
 
-    try {
-      const { error: supError } = await supabase.auth.signInWithPassword({ email, password });
-      if (!supError) {
-        setLoading(false);
-        navigate({ to: "/dashboard", replace: true });
-        return;
+    const { error: supError } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (supError) {
+      // Show the real error — wrong password, email not confirmed, etc.
+      if (supError.message.includes("Email not confirmed")) {
+        setError("Please verify your email before signing in. Check your inbox for a confirmation link.");
+      } else if (supError.message.includes("Invalid login credentials")) {
+        setError("Incorrect email or password. Please try again.");
+      } else {
+        setError(supError.message);
       }
-
-      // If backend fails or error occurs, log in seamlessly
-      signInAsDemo(email, userName);
       setLoading(false);
-      navigate({ to: "/dashboard", replace: true });
-    } catch (err) {
-      signInAsDemo(email, userName);
-      setLoading(false);
-      navigate({ to: "/dashboard", replace: true });
+      return;
     }
+
+    // Supabase session is set automatically via onAuthStateChange in useAuth
+    setLoading(false);
+    navigate({ to: "/dashboard", replace: true });
   };
 
   const onGoogle = async () => {
     setError(null);
     setGoogleLoading(true);
     try {
-      const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin,
+      const { error: supError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/dashboard`,
+        },
       });
-      if (result.error) {
-        signInAsDemo("google.user@cogniflow.ai", "Google Member");
+      if (supError) {
+        setError(supError.message || "Google sign-in failed. Please try again.");
         setGoogleLoading(false);
-        navigate({ to: "/dashboard", replace: true });
-        return;
       }
-      if (result.redirected) return;
-      navigate({ to: "/dashboard", replace: true });
     } catch (err) {
-      signInAsDemo("google.user@cogniflow.ai", "Google Member");
+      setError(err instanceof Error ? err.message : "Google sign-in failed. Please try again.");
       setGoogleLoading(false);
-      navigate({ to: "/dashboard", replace: true });
     }
   };
 
@@ -100,3 +111,4 @@ function LoginPage() {
     </AuthShell>
   );
 }
+

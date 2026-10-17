@@ -2,41 +2,11 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
-const DEMO_SESSION_KEY = "cogniflow_demo_session";
-
 type AuthState = {
   session: Session | null;
   user: User | null;
   loading: boolean;
   signOut: () => Promise<void>;
-  signInAsDemo: (email?: string, name?: string) => void;
-};
-
-export const createDemoSession = (email = "demo@cogniflow.ai", name = "Demo User"): Session => {
-  const parts = name.trim().split(" ");
-  const firstName = parts[0] || "Demo";
-  const lastName = parts.slice(1).join(" ") || "";
-  const user: User = {
-    id: "demo-user-id",
-    app_metadata: { provider: "email" },
-    user_metadata: {
-      full_name: name,
-      first_name: firstName,
-      last_name: lastName,
-    },
-    aud: "authenticated",
-    created_at: new Date().toISOString(),
-    email,
-    role: "authenticated",
-    updated_at: new Date().toISOString(),
-  };
-  return {
-    access_token: "demo-access-token",
-    token_type: "bearer",
-    expires_in: 3600,
-    refresh_token: "demo-refresh-token",
-    user,
-  };
 };
 
 const AuthContext = createContext<AuthState>({
@@ -44,7 +14,6 @@ const AuthContext = createContext<AuthState>({
   user: null,
   loading: true,
   signOut: async () => {},
-  signInAsDemo: () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -52,41 +21,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const savedDemo = localStorage.getItem(DEMO_SESSION_KEY);
-    if (savedDemo) {
-      try {
-        setSession(JSON.parse(savedDemo));
-        setLoading(false);
+    // Check if OAuth callback params exist in URL (only for success codes/tokens)
+    const hasOAuthParams =
+      typeof window !== "undefined" &&
+      !window.location.search.includes("error=") &&
+      !window.location.hash.includes("error=") &&
+      (window.location.search.includes("code=") ||
+        window.location.hash.includes("access_token="));
+
+    // Listen to auth state changes from Supabase (login, logout, token refresh)
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
+      setSession(next);
+      // Don't turn off loading on INITIAL_SESSION if an OAuth code exchange is in flight
+      if (event === "INITIAL_SESSION" && !next && hasOAuthParams) {
         return;
-      } catch (e) {
-        localStorage.removeItem(DEMO_SESSION_KEY);
       }
-    }
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
-      if (!localStorage.getItem(DEMO_SESSION_KEY)) {
-        setSession(next);
-        setLoading(false);
-      }
-    });
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!localStorage.getItem(DEMO_SESSION_KEY)) {
-        setSession(data.session);
-        setLoading(false);
-      }
-    }).catch(() => {
       setLoading(false);
     });
 
-    return () => sub.subscription.unsubscribe();
-  }, []);
+    // Restore existing session on page load
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (data?.session) {
+          setSession(data.session);
+          setLoading(false);
+        } else if (!hasOAuthParams) {
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        setLoading(false);
+      });
 
-  const signInAsDemo = (email = "demo@cogniflow.ai", name = "Demo User") => {
-    const demo = createDemoSession(email, name);
-    localStorage.setItem(DEMO_SESSION_KEY, JSON.stringify(demo));
-    setSession(demo);
-  };
+    // Safety timeout in case OAuth code is invalid or Supabase doesn't respond
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (hasOAuthParams) {
+      timer = setTimeout(() => {
+        setLoading(false);
+      }, 4000);
+    }
+
+    return () => {
+      sub.subscription.unsubscribe();
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   const value = useMemo<AuthState>(
     () => ({
@@ -94,15 +74,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: session?.user ?? null,
       loading,
       signOut: async () => {
-        localStorage.removeItem(DEMO_SESSION_KEY);
+        await supabase.auth.signOut();
         setSession(null);
-        try {
-          await supabase.auth.signOut();
-        } catch (e) {
-          // ignore errors when backend is offline
-        }
       },
-      signInAsDemo,
     }),
     [session, loading],
   );
