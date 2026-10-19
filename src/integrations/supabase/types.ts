@@ -49,6 +49,66 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      },
+      documents: {
+        Row: {
+          id: string
+          user_id: string | null
+          name: string
+          file_path: string | null
+          file_url: string | null
+          file_size: number | null
+          file_size_formatted: string | null
+          file_type: string | null
+          category: string
+          confidence: number
+          status: string
+          folder: string
+          extracted_text: string | null
+          validation_results: Json | null
+          timeline: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id?: string | null
+          name: string
+          file_path?: string | null
+          file_url?: string | null
+          file_size?: number | null
+          file_size_formatted?: string | null
+          file_type?: string | null
+          category?: string
+          confidence?: number
+          status?: string
+          folder?: string
+          extracted_text?: string | null
+          validation_results?: Json | null
+          timeline?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string | null
+          name?: string
+          file_path?: string | null
+          file_url?: string | null
+          file_size?: number | null
+          file_size_formatted?: string | null
+          file_type?: string | null
+          category?: string
+          confidence?: number
+          status?: string
+          folder?: string
+          extracted_text?: string | null
+          validation_results?: Json | null
+          timeline?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
     }
     Views: {
