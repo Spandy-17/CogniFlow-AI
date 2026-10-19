@@ -343,6 +343,34 @@ var ChevronsRight = createLucideIcon("chevrons-right", [["path", {
 * This source code is licensed under the ISC license.
 * See the LICENSE file in the root directory of this source tree.
 */
+var CircleAlert = createLucideIcon("circle-alert", [
+	["circle", {
+		cx: "12",
+		cy: "12",
+		r: "10",
+		key: "1mglay"
+	}],
+	["line", {
+		x1: "12",
+		x2: "12",
+		y1: "8",
+		y2: "12",
+		key: "1pkeuh"
+	}],
+	["line", {
+		x1: "12",
+		x2: "12.01",
+		y1: "16",
+		y2: "16",
+		key: "4dfq90"
+	}]
+]);
+/**
+* @license lucide-react v0.575.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
 var CircleCheck = createLucideIcon("circle-check", [["circle", {
 	cx: "12",
 	cy: "12",
@@ -582,32 +610,6 @@ var Download = createLucideIcon("download", [
 	["path", {
 		d: "m7 10 5 5 5-5",
 		key: "brsn70"
-	}]
-]);
-/**
-* @license lucide-react v0.575.0 - ISC
-*
-* This source code is licensed under the ISC license.
-* See the LICENSE file in the root directory of this source tree.
-*/
-var EllipsisVertical = createLucideIcon("ellipsis-vertical", [
-	["circle", {
-		cx: "12",
-		cy: "12",
-		r: "1",
-		key: "41hilf"
-	}],
-	["circle", {
-		cx: "12",
-		cy: "5",
-		r: "1",
-		key: "gxeob9"
-	}],
-	["circle", {
-		cx: "12",
-		cy: "19",
-		r: "1",
-		key: "lyex9k"
 	}]
 ]);
 /**
@@ -867,16 +869,6 @@ var Folder = createLucideIcon("folder", [["path", {
 * This source code is licensed under the ISC license.
 * See the LICENSE file in the root directory of this source tree.
 */
-var Funnel = createLucideIcon("funnel", [["path", {
-	d: "M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z",
-	key: "sc7q7i"
-}]]);
-/**
-* @license lucide-react v0.575.0 - ISC
-*
-* This source code is licensed under the ISC license.
-* See the LICENSE file in the root directory of this source tree.
-*/
 var Github = createLucideIcon("github", [["path", {
 	d: "M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4",
 	key: "tonef"
@@ -1012,6 +1004,26 @@ var LogOut = createLucideIcon("log-out", [
 	["path", {
 		d: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4",
 		key: "1uf3rs"
+	}]
+]);
+/**
+* @license lucide-react v0.575.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
+var MailCheck = createLucideIcon("mail-check", [
+	["path", {
+		d: "M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h8",
+		key: "12jkf8"
+	}],
+	["path", {
+		d: "m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7",
+		key: "1ocrg3"
+	}],
+	["path", {
+		d: "m16 19 2 2 4-4",
+		key: "1b14m6"
 	}]
 ]);
 /**
@@ -1602,4 +1614,4 @@ var Zap = createLucideIcon("zap", [["path", {
 	key: "1xq2db"
 }]]);
 //#endregion
-export { EllipsisVertical as $, MessageCircle as A, Funnel as B, Play as C, ArrowLeft as Ct, MoveRight as D, Palette as E, LayoutDashboard as F, FileXCorner as G, FolderTree as H, Layers as I, FileSpreadsheet as J, FileUp as K, KeyRound as L, Mail as M, LogOut as N, Moon as O, LoaderCircle as P, ExternalLink as Q, HardDrive as R, Plus as S, ArrowRight as St, Pause as T, FolderOpen as U, Folder as V, Files as W, Eye as X, FileCheckCorner as Y, EyeOff as Z, Send as _, Calendar as _t, Upload as a, Clock as at, RotateCcw as b, Bell as bt, Trash2 as c, CircleUser as ct, Terminal as d, ChevronsLeft as dt, Download as et, Sun as f, ChevronRight as ft, Settings as g, Camera as gt, ShieldCheck as h, ChartColumn as ht, User as i, CloudUpload as it, MapPin as j, Monitor as k, ThumbsUp as l, CircleCheck as lt, Shield as m, Check as mt, X as n, Cpu as nt, TriangleAlert as o, Clipboard as ot, Sparkles as p, ChevronDown as pt, FileText as q, Users as r, Copy as rt, TrendingUp as s, CircleX as st, Zap as t, Database as tt, ThumbsDown as u, ChevronsRight as ut, Search as v, Briefcase as vt, Pencil as w, RefreshCw as x, ArrowUpRight as xt, ScanText as y, Bot as yt, Github as z };
+export { Download as $, MessageCircle as A, Github as B, Play as C, ArrowLeft as Ct, MoveRight as D, Palette as E, LoaderCircle as F, FileXCorner as G, FolderTree as H, LayoutDashboard as I, FileSpreadsheet as J, FileUp as K, Layers as L, Mail as M, MailCheck as N, Moon as O, LogOut as P, ExternalLink as Q, KeyRound as R, Plus as S, ArrowRight as St, Pause as T, FolderOpen as U, Folder as V, Files as W, Eye as X, FileCheckCorner as Y, EyeOff as Z, Send as _, Calendar as _t, Upload as a, Clipboard as at, RotateCcw as b, Bell as bt, Trash2 as c, CircleCheck as ct, Terminal as d, ChevronsLeft as dt, Database as et, Sun as f, ChevronRight as ft, Settings as g, Camera as gt, ShieldCheck as h, ChartColumn as ht, User as i, Clock as it, MapPin as j, Monitor as k, ThumbsUp as l, CircleAlert as lt, Shield as m, Check as mt, X as n, Copy as nt, TriangleAlert as o, CircleX as ot, Sparkles as p, ChevronDown as pt, FileText as q, Users as r, CloudUpload as rt, TrendingUp as s, CircleUser as st, Zap as t, Cpu as tt, ThumbsDown as u, ChevronsRight as ut, Search as v, Briefcase as vt, Pencil as w, RefreshCw as x, ArrowUpRight as xt, ScanText as y, Bot as yt, HardDrive as z };

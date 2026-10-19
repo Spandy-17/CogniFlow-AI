@@ -1,121 +1,408 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState, useRef } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Card, PageHeader } from "@/components/DashboardShell";
-import { UploadCloud, FileText, X, Sparkles, CheckCircle2 } from "lucide-react";
+import {
+  UploadCloud, FileText, X, Sparkles, CheckCircle2, Database,
+  ArrowRight, Copy, Check, AlertCircle, RefreshCw, Layers, ShieldCheck, Cpu
+} from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { uploadAndProcessDocument, type DocumentRecord } from "@/lib/document-service";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/dashboard/upload")({
+  head: () => ({
+    meta: [
+      { title: "Upload Documents · CogniFlow" },
+      { name: "description", content: "Upload documents to be processed by multi-agent AI and saved to PostgreSQL." },
+    ],
+  }),
   component: UploadPage,
 });
 
-type Item = { id: string; name: string; size: string; progress: number; status: "uploading" | "processing" | "done" };
+type UploadingItem = {
+  id: string;
+  name: string;
+  size: string;
+  progress: number;
+  stage: string;
+  status: "uploading" | "processing" | "done" | "error";
+  doc?: DocumentRecord;
+  dbSaved?: boolean;
+  error?: string;
+};
+
+const SQL_MIGRATION = `-- CogniFlow-AI Database Schema
+-- Execute this in DBeaver 26.3 SQL Editor to create table & storage
+
+CREATE TABLE IF NOT EXISTS public.documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  file_path TEXT,
+  file_url TEXT,
+  file_size BIGINT,
+  file_size_formatted TEXT,
+  file_type TEXT,
+  category TEXT DEFAULT 'Unclassified',
+  confidence NUMERIC DEFAULT 0,
+  status TEXT DEFAULT 'uploaded',
+  folder TEXT DEFAULT 'Unassigned',
+  extracted_text TEXT,
+  validation_results JSONB DEFAULT '[]'::jsonb,
+  timeline JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow select for all" ON public.documents FOR SELECT USING (true);
+CREATE POLICY "Allow insert for all" ON public.documents FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow update for all" ON public.documents FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Allow delete for all" ON public.documents FOR DELETE USING (true);
+
+GRANT ALL ON TABLE public.documents TO anon, authenticated, service_role;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('documents', 'documents', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+CREATE POLICY "Allow public uploads to documents bucket" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'documents');
+CREATE POLICY "Allow public read from documents bucket" ON storage.objects FOR SELECT USING (bucket_id = 'documents');
+
+NOTIFY pgrst, 'reload schema';`;
 
 function UploadPage() {
-  const [items, setItems] = useState<Item[]>([
-    { id: "1", name: "Certificate_Ada.pdf", size: "2.4 MB", progress: 100, status: "done" },
-    { id: "2", name: "Report_Q3.docx", size: "1.1 MB", progress: 62, status: "processing" },
-  ]);
+  const { user } = useAuth();
+  const [items, setItems] = useState<UploadingItem[]>([]);
   const [drag, setDrag] = useState(false);
+  const [showDbGuide, setShowDbGuide] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [dbStatus, setDbStatus] = useState<"checking" | "connected" | "needs_migration">("checking");
   const ref = useRef<HTMLInputElement>(null);
 
-  const addFiles = (files: FileList | null) => {
-    if (!files) return;
-    Array.from(files).forEach((f) => {
-      const id = crypto.randomUUID();
-      setItems((prev) => [...prev, { id, name: f.name, size: `${(f.size/1024/1024).toFixed(1)} MB`, progress: 0, status: "uploading" }]);
-      let p = 0;
-      const iv = setInterval(() => {
-        p += 8 + Math.random() * 12;
-        if (p >= 100) {
-          clearInterval(iv);
-          setItems((prev) => prev.map((it) => it.id === id ? { ...it, progress: 100, status: "processing" } : it));
-          setTimeout(() => {
-            setItems((prev) => prev.map((it) => it.id === id ? { ...it, status: "done" } : it));
-          }, 1600);
+  // Check if PostgreSQL 'documents' table exists
+  const checkDatabaseConnection = async () => {
+    setDbStatus("checking");
+    try {
+      const { error } = await supabase.from("documents").select("id").limit(1);
+      if (error && (error.code === "PGRST205" || error.message.includes("does not exist"))) {
+        setDbStatus("needs_migration");
+      } else {
+        setDbStatus("connected");
+      }
+    } catch {
+      setDbStatus("needs_migration");
+    }
+  };
+
+  useEffect(() => {
+    checkDatabaseConnection();
+  }, []);
+
+  const handleCopySql = async () => {
+    try {
+      await navigator.clipboard.writeText(SQL_MIGRATION);
+      setCopiedSql(true);
+      toast.success("SQL copied! Paste and run it in DBeaver 26.3");
+      setTimeout(() => setCopiedSql(false), 3000);
+    } catch {
+      toast.error("Failed to copy to clipboard");
+    }
+  };
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const fileArray = Array.from(files);
+
+    for (const f of fileArray) {
+      const tempId = crypto.randomUUID();
+      const fileSize = (f.size / 1024 / 1024).toFixed(1) + " MB";
+
+      // Add to UI queue
+      setItems((prev) => [
+        {
+          id: tempId,
+          name: f.name,
+          size: fileSize,
+          progress: 5,
+          stage: "Uploading to cloud storage…",
+          status: "uploading",
+        },
+        ...prev,
+      ]);
+
+      try {
+        const result = await uploadAndProcessDocument(f, user, (stageName, percent) => {
+          setItems((prev) =>
+            prev.map((it) =>
+              it.id === tempId
+                ? {
+                    ...it,
+                    progress: percent,
+                    stage: stageName,
+                    status: percent >= 100 ? "done" : percent >= 30 ? "processing" : "uploading",
+                  }
+                : it
+            )
+          );
+        });
+
+        // Finished processing
+        setItems((prev) =>
+          prev.map((it) =>
+            it.id === tempId
+              ? {
+                  ...it,
+                  id: result.doc.id,
+                  progress: 100,
+                  stage: `Routed to ${result.doc.folder} ✓`,
+                  status: "done",
+                  doc: result.doc,
+                  dbSaved: result.dbSaved,
+                }
+              : it
+          )
+        );
+
+        if (result.dbSaved) {
+          toast.success(`"${f.name}" saved in PostgreSQL & routed to ${result.doc.folder}`);
         } else {
-          setItems((prev) => prev.map((it) => it.id === id ? { ...it, progress: Math.min(99, p) } : it));
+          toast.info(`"${f.name}" routed! (Saved locally. Run SQL in DBeaver to enable cloud DB sync)`);
         }
-      }, 250);
-    });
+      } catch (err: any) {
+        setItems((prev) =>
+          prev.map((it) =>
+            it.id === tempId
+              ? {
+                  ...it,
+                  status: "error",
+                  error: err?.message || "Upload failed",
+                  stage: "Failed",
+                }
+              : it
+          )
+        );
+        toast.error(`Upload error: ${err?.message || "Unknown error"}`);
+      }
+    }
   };
 
   return (
     <>
       <PageHeader
         title="Upload documents"
-        subtitle="Drop files here — AI agents start processing automatically."
+        subtitle="Auto-extract, classify, validate, and store documents into PostgreSQL database."
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowDbGuide((v) => !v)}
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                dbStatus === "connected"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  : "border-warning/40 bg-warning/10 text-warning hover:bg-warning/20"
+              }`}
+            >
+              <Database className="size-3.5" />
+              {dbStatus === "checking" && "Checking DB…"}
+              {dbStatus === "connected" && "PostgreSQL Connected ✓"}
+              {dbStatus === "needs_migration" && "DBeaver Setup Guide"}
+            </button>
+            <Link
+              to="/dashboard/documents"
+              className="inline-flex items-center gap-2 rounded-xl border border-border bg-background/60 px-3 py-2 text-xs font-medium hover:bg-secondary transition"
+            >
+              View All Documents <ArrowRight className="size-3.5" />
+            </Link>
+          </div>
+        }
       />
 
-      <Card className="!p-0 overflow-hidden">
+      {/* DBeaver / PostgreSQL Guide Card */}
+      <AnimatePresence>
+        {showDbGuide && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-6 overflow-hidden"
+          >
+            <Card className="border border-border/80 bg-secondary/30 p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Database className="size-5 text-primary" />
+                    <h2 className="text-base font-semibold">PostgreSQL & DBeaver Database Setup</h2>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Your cloud PostgreSQL credentials from <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">.env</code> are linked.
+                    Run this SQL script in DBeaver 26.3 to create the <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">documents</code> table and storage bucket.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={checkDatabaseConnection}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-secondary"
+                  >
+                    <RefreshCw className="size-3" /> Re-check Table
+                  </button>
+                  <button
+                    onClick={handleCopySql}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-sm hover:opacity-90"
+                  >
+                    {copiedSql ? <Check className="size-3.5 text-white" /> : <Copy className="size-3.5 text-white" />}
+                    {copiedSql ? "Copied!" : "Copy SQL for DBeaver"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-3 relative rounded-xl border border-border bg-background/80 p-3 font-mono text-[11px] text-muted-foreground">
+                <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap">{SQL_MIGRATION}</pre>
+              </div>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Main Upload Dropzone */}
+      <Card className="!p-0 overflow-hidden border border-border/70">
         <div
-          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDrag(true);
+          }}
           onDragLeave={() => setDrag(false)}
-          onDrop={(e) => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDrag(false);
+            handleFiles(e.dataTransfer.files);
+          }}
           onClick={() => ref.current?.click()}
-          className={`relative m-4 grid cursor-pointer place-items-center rounded-2xl border-2 border-dashed py-16 text-center transition-all ${
-            drag ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-secondary/50"
+          className={`relative m-4 grid cursor-pointer place-items-center rounded-2xl border-2 border-dashed py-14 text-center transition-all ${
+            drag ? "border-primary bg-primary/10 scale-[0.99]" : "border-border/80 bg-background/50 hover:bg-secondary/40"
           }`}
         >
-          <input ref={ref} type="file" multiple accept=".pdf,.docx,.png,.jpg,.jpeg" hidden onChange={(e) => addFiles(e.target.files)} />
+          <input
+            ref={ref}
+            type="file"
+            multiple
+            accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.xlsx,.txt"
+            hidden
+            onChange={(e) => handleFiles(e.target.files)}
+          />
+
           <motion.div
             animate={{ y: drag ? -4 : 0 }}
             className="grid size-16 place-items-center rounded-2xl bg-gradient-to-br from-brand-1 to-brand-2 text-white shadow-glow"
           >
-            <UploadCloud className="size-7" />
+            <UploadCloud className="size-8" />
           </motion.div>
-          <p className="mt-4 text-lg font-semibold">Drop files or click to browse</p>
-          <p className="mt-1 text-sm text-muted-foreground">PDF · DOCX · PNG · JPG · up to 25 MB each</p>
-          <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-            <Sparkles className="size-3.5" /> AI processing starts automatically
+
+          <p className="mt-4 text-lg font-semibold text-foreground">Click to upload or drag & drop files here</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Supports PDF, DOCX, PNG, JPG, JPEG, XLSX up to 50 MB
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+              <Cpu className="size-3.5" /> AI Multi-Agent Pipeline
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <Database className="size-3.5" /> Cloud PostgreSQL Storage
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-purple-500/10 px-3 py-1 text-xs font-medium text-purple-600 dark:text-purple-400">
+              <ShieldCheck className="size-3.5" /> Rule Validation
+            </span>
           </div>
         </div>
       </Card>
 
-      <div className="mt-4 space-y-2">
-        <AnimatePresence>
-          {items.map((it) => (
-            <motion.div
-              key={it.id}
-              layout
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              className="flex items-center gap-3 rounded-2xl glass-strong p-3"
+      {/* Uploaded Items List */}
+      {items.length > 0 && (
+        <div className="mt-6 space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <p className="text-sm font-semibold text-foreground">Uploaded Documents ({items.length})</p>
+            <button
+              onClick={() => setItems([])}
+              className="text-xs text-muted-foreground hover:text-destructive transition"
             >
-              <div className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                <FileText className="size-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="truncate text-sm font-semibold">{it.name}</p>
-                  <span className="text-xs text-muted-foreground shrink-0">{it.size}</span>
-                </div>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                    <motion.div
-                      className="h-full rounded-full bg-gradient-to-r from-brand-1 to-brand-2"
-                      animate={{ width: `${it.progress}%` }}
-                      transition={{ duration: 0.4 }}
-                    />
+              Clear list
+            </button>
+          </div>
+
+          <AnimatePresence>
+            {items.map((it) => (
+              <motion.div
+                key={it.id}
+                layout
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl glass-strong p-4 border border-border/60 transition hover:border-primary/30"
+              >
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-brand-1/15 to-brand-2/15 text-primary border border-primary/20">
+                    <FileText className="size-5" />
                   </div>
-                  <span className="text-[10px] font-semibold text-muted-foreground w-24 text-right">
-                    {it.status === "uploading" && `Uploading ${Math.round(it.progress)}%`}
-                    {it.status === "processing" && "AI processing…"}
-                    {it.status === "done" && "Routed ✓"}
-                  </span>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-semibold">{it.name}</p>
+                      <span className="text-[11px] text-muted-foreground shrink-0">{it.size}</span>
+                    </div>
+
+                    <div className="mt-2 flex items-center gap-3">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                        <motion.div
+                          className="h-full rounded-full bg-gradient-to-r from-brand-1 to-brand-2"
+                          animate={{ width: `${it.progress}%` }}
+                          transition={{ duration: 0.3 }}
+                        />
+                      </div>
+                      <span className="text-xs font-medium text-muted-foreground w-44 text-right truncate">
+                        {it.stage}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              {it.status === "done" ? (
-                <CheckCircle2 className="size-5 text-success" />
-              ) : (
-                <button onClick={() => setItems((p) => p.filter((x) => x.id !== it.id))} className="text-muted-foreground hover:text-destructive">
-                  <X className="size-4" />
-                </button>
-              )}
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+
+                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                  {it.status === "done" && it.doc && (
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2.5 py-1 text-xs font-medium text-success">
+                        <CheckCircle2 className="size-3.5" /> {it.doc.cat}
+                      </span>
+                      <Link
+                        to="/dashboard/document/$docId"
+                        params={{ docId: it.doc.id }}
+                        className="inline-flex items-center gap-1 rounded-xl bg-primary/10 hover:bg-primary/20 px-3 py-1 text-xs font-medium text-primary transition"
+                      >
+                        Inspect <ArrowRight className="size-3" />
+                      </Link>
+                    </div>
+                  )}
+
+                  {it.status === "error" && (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-destructive">
+                      <AlertCircle className="size-3.5" /> Failed
+                    </span>
+                  )}
+
+                  <button
+                    onClick={() => setItems((p) => p.filter((x) => x.id !== it.id))}
+                    className="p-1 text-muted-foreground hover:text-destructive rounded-lg hover:bg-secondary transition"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
     </>
   );
 }
