@@ -7,7 +7,7 @@ import {
   ArrowRight, Copy, Check, AlertCircle, RefreshCw, Layers, ShieldCheck, Cpu
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { uploadAndProcessDocument, type DocumentRecord } from "@/lib/document-service";
+import { saveUploadedDocument, type DocumentRecord } from "@/lib/document-service";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -15,7 +15,7 @@ export const Route = createFileRoute("/dashboard/upload")({
   head: () => ({
     meta: [
       { title: "Upload Documents · CogniFlow" },
-      { name: "description", content: "Upload documents to be processed by multi-agent AI and saved to PostgreSQL." },
+      { name: "description", content: "Save uploaded documents to the shared database before choosing to process them." },
     ],
   }),
   component: UploadPage,
@@ -35,6 +35,7 @@ type UploadingItem = {
 
 const SQL_MIGRATION = `-- CogniFlow-AI Database Schema
 -- Execute this in DBeaver 26.3 SQL Editor to create table & storage
+-- Uploads are saved first. Agent processing and folder routing are a separate action.
 
 CREATE TABLE IF NOT EXISTS public.documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -58,19 +59,65 @@ CREATE TABLE IF NOT EXISTS public.documents (
 
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow select for all" ON public.documents FOR SELECT USING (true);
-CREATE POLICY "Allow insert for all" ON public.documents FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow update for all" ON public.documents FOR UPDATE USING (true) WITH CHECK (true);
-CREATE POLICY "Allow delete for all" ON public.documents FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Allow select for all" ON public.documents;
+DROP POLICY IF EXISTS "Allow insert for all" ON public.documents;
+DROP POLICY IF EXISTS "Allow update for all" ON public.documents;
+DROP POLICY IF EXISTS "Allow delete for all" ON public.documents;
+DROP POLICY IF EXISTS "Users can read their own documents" ON public.documents;
+DROP POLICY IF EXISTS "Authenticated users can read shared documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can insert their own documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can update their own documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can delete their own documents" ON public.documents;
+
+CREATE POLICY "Authenticated users can read shared documents" ON public.documents FOR SELECT TO authenticated USING (auth.uid() IS NOT NULL);
+CREATE POLICY "Users can insert their own documents" ON public.documents FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own documents" ON public.documents FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own documents" ON public.documents FOR DELETE TO authenticated USING (auth.uid() = user_id);
+
+DROP FUNCTION IF EXISTS public.complete_document_processing(UUID, TEXT, NUMERIC, TEXT, TEXT, TEXT, JSONB, JSONB);
+CREATE OR REPLACE FUNCTION public.complete_document_processing(
+  p_document_id UUID, p_category TEXT, p_confidence NUMERIC, p_status TEXT,
+  p_folder TEXT, p_extracted_text TEXT, p_file_url TEXT, p_validation_results JSONB, p_timeline JSONB
+)
+RETURNS public.documents LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE updated_document public.documents;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  IF p_status NOT IN ('processing', 'routed', 'review', 'rejected', 'error') THEN RAISE EXCEPTION 'Invalid processing status'; END IF;
+  UPDATE public.documents
+  SET category = COALESCE(p_category, 'Unclassified'), confidence = COALESCE(p_confidence, 0),
+      status = p_status, folder = COALESCE(p_folder, 'Unassigned'),
+      extracted_text = COALESCE(p_extracted_text, ''),
+      file_url = COALESCE(p_file_url, file_url),
+      validation_results = COALESCE(p_validation_results, '[]'::jsonb),
+      timeline = COALESCE(p_timeline, '[]'::jsonb)
+  WHERE id = p_document_id RETURNING * INTO updated_document;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Document not found'; END IF;
+  RETURN updated_document;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.complete_document_processing(UUID, TEXT, NUMERIC, TEXT, TEXT, TEXT, TEXT, JSONB, JSONB) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.complete_document_processing(UUID, TEXT, NUMERIC, TEXT, TEXT, TEXT, TEXT, JSONB, JSONB) TO authenticated;
 
 GRANT ALL ON TABLE public.documents TO anon, authenticated, service_role;
 
 INSERT INTO storage.buckets (id, name, public)
-VALUES ('documents', 'documents', true)
-ON CONFLICT (id) DO UPDATE SET public = true;
+VALUES ('documents', 'documents', false)
+ON CONFLICT (id) DO UPDATE SET public = false;
 
-CREATE POLICY "Allow public uploads to documents bucket" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'documents');
-CREATE POLICY "Allow public read from documents bucket" ON storage.objects FOR SELECT USING (bucket_id = 'documents');
+DROP POLICY IF EXISTS "Allow public uploads to documents bucket" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public read from documents bucket" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public delete from documents bucket" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public update in documents bucket" ON storage.objects;
+DROP POLICY IF EXISTS "Users can upload their own documents" ON storage.objects;
+DROP POLICY IF EXISTS "Users can read their own stored documents" ON storage.objects;
+DROP POLICY IF EXISTS "Authenticated users can read shared document files" ON storage.objects;
+DROP POLICY IF EXISTS "Users can delete their own stored documents" ON storage.objects;
+DROP POLICY IF EXISTS "Users can update their own stored documents" ON storage.objects;
+CREATE POLICY "Users can upload their own documents" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'documents' AND (storage.foldername(name))[1] = auth.uid()::text);
+CREATE POLICY "Authenticated users can read shared document files" ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'documents' AND auth.uid() IS NOT NULL);
+CREATE POLICY "Users can delete their own stored documents" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'documents' AND (storage.foldername(name))[1] = auth.uid()::text);
+CREATE POLICY "Users can update their own stored documents" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'documents' AND (storage.foldername(name))[1] = auth.uid()::text) WITH CHECK (bucket_id = 'documents' AND (storage.foldername(name))[1] = auth.uid()::text);
 
 NOTIFY pgrst, 'reload schema';`;
 
@@ -136,7 +183,7 @@ function UploadPage() {
       ]);
 
       try {
-        const result = await uploadAndProcessDocument(f, user, (stageName, percent) => {
+        const savedDoc = await saveUploadedDocument(f, user, (stageName, percent) => {
           setItems((prev) =>
             prev.map((it) =>
               it.id === tempId
@@ -151,28 +198,24 @@ function UploadPage() {
           );
         });
 
-        // Finished processing
+        // Upload is persisted; AI processing is an explicit later action.
         setItems((prev) =>
           prev.map((it) =>
             it.id === tempId
               ? {
                   ...it,
-                  id: result.doc.id,
+                  id: savedDoc.id,
                   progress: 100,
-                  stage: `Routed to ${result.doc.folder} ✓`,
+                  stage: "Saved in My Documents · ready for AI processing",
                   status: "done",
-                  doc: result.doc,
-                  dbSaved: result.dbSaved,
+                  doc: savedDoc,
+                  dbSaved: true,
                 }
               : it
           )
         );
 
-        if (result.dbSaved) {
-          toast.success(`"${f.name}" saved in PostgreSQL & routed to ${result.doc.folder}`);
-        } else {
-          toast.info(`"${f.name}" routed! (Saved locally. Run SQL in DBeaver to enable cloud DB sync)`);
-        }
+        toast.success(`"${f.name}" saved in My Documents. Go to AI Processing when you're ready to process it.`);
       } catch (err: any) {
         setItems((prev) =>
           prev.map((it) =>
@@ -195,7 +238,7 @@ function UploadPage() {
     <>
       <PageHeader
         title="Upload documents"
-        subtitle="Auto-extract, classify, validate, and store documents into PostgreSQL database."
+        subtitle="Save uploads to My Documents first. AI processing and folder routing are started separately."
         actions={
           <div className="flex items-center gap-2">
             <button
@@ -303,12 +346,12 @@ function UploadPage() {
 
           <p className="mt-4 text-lg font-semibold text-foreground">Click to upload or drag & drop files here</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Supports PDF, DOCX, PNG, JPG, JPEG, XLSX up to 50 MB
+            Files are saved first, not processed. Supports PDF, DOCX, PNG, JPG, JPEG, XLSX, TXT up to 50 MB
           </p>
 
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-              <Cpu className="size-3.5" /> AI Multi-Agent Pipeline
+              <Cpu className="size-3.5" /> Process later in AI Center
             </span>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
               <Database className="size-3.5" /> Cloud PostgreSQL Storage

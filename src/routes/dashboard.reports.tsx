@@ -1,82 +1,179 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Card, PageHeader } from "@/components/DashboardShell";
-import { Download, FileSpreadsheet, FileText } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { UploadCloud, Loader2 } from "lucide-react";
+import {
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell,
+  Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
+import { useEffect, useState } from "react";
+import { fetchAllDocuments, type DocumentRecord } from "@/lib/document-service";
 
 export const Route = createFileRoute("/dashboard/reports")({ component: ReportsPage });
 
-const daily = Array.from({ length: 30 }, (_, i) => ({ day: i + 1, uploads: 80 + Math.round(Math.sin(i/3)*30 + Math.random()*40) }));
-const time = Array.from({ length: 12 }, (_, i) => ({ m: `M${i+1}`, ms: 1800 + Math.round(Math.sin(i/2)*400 + Math.random()*300) }));
-const cats = [
-  { name: "Certificates", v: 38 }, { name: "Reports", v: 24 }, { name: "Invoices", v: 18 },
-  { name: "Contracts", v: 12 }, { name: "Other", v: 8 },
-];
-const colors = ["oklch(0.55 0.22 275)","oklch(0.58 0.24 300)","oklch(0.7 0.16 250)","oklch(0.7 0.17 155)","oklch(0.78 0.16 75)"];
-const topUsers = [
-  { n: "Ada Lovelace", u: 482 }, { n: "Grace Hopper", u: 401 }, { n: "Alan Turing", u: 356 },
-  { n: "Katherine Johnson", u: 288 }, { n: "Linus Torvalds", u: 214 },
+const colors = [
+  "oklch(0.55 0.22 275)", "oklch(0.58 0.24 300)", "oklch(0.7 0.16 250)",
+  "oklch(0.7 0.17 155)", "oklch(0.78 0.16 75)",
 ];
 
 function ReportsPage() {
+  const [docs, setDocs] = useState<DocumentRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchAllDocuments()
+      .then(setDocs)
+      .catch(() => setDocs([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Build category distribution from real docs
+  const catCounts: Record<string, number> = {};
+  for (const d of docs) {
+    catCounts[d.cat] = (catCounts[d.cat] || 0) + 1;
+  }
+  const cats = Object.entries(catCounts).map(([name, v]) => ({ name, v }));
+
+  // Build status distribution
+  const statusCounts: Record<string, number> = {};
+  for (const d of docs) {
+    statusCounts[d.status] = (statusCounts[d.status] || 0) + 1;
+  }
+  const statusBars = Object.entries(statusCounts).map(([name, v]) => ({ name, v }));
+
+  // Folder distribution
+  const folderCounts: Record<string, number> = {};
+  for (const d of docs) {
+    folderCounts[d.folder] = (folderCounts[d.folder] || 0) + 1;
+  }
+  const folderBars = Object.entries(folderCounts)
+    .map(([n, u]) => ({ n, u }))
+    .sort((a, b) => b.u - a.u)
+    .slice(0, 8);
+
+  // Confidence distribution buckets
+  const confBuckets = [
+    { range: "0–25%", count: 0 },
+    { range: "26–50%", count: 0 },
+    { range: "51–75%", count: 0 },
+    { range: "76–90%", count: 0 },
+    { range: "91–100%", count: 0 },
+  ];
+  for (const d of docs) {
+    const c = d.conf || 0;
+    if (c <= 25) confBuckets[0].count++;
+    else if (c <= 50) confBuckets[1].count++;
+    else if (c <= 75) confBuckets[2].count++;
+    else if (c <= 90) confBuckets[3].count++;
+    else confBuckets[4].count++;
+  }
+
+  const isEmpty = docs.length === 0;
+
   return (
     <>
-      <PageHeader title="Reports & Analytics" subtitle="Everything your team needs to prove the ROI."
-        actions={<div className="flex gap-2">
-          <button className="inline-flex items-center gap-2 rounded-xl border border-border bg-background/60 px-3 py-2 text-sm font-medium hover:bg-secondary"><FileSpreadsheet className="size-4" /> CSV</button>
-          <button className="inline-flex items-center gap-2 rounded-xl border border-border bg-background/60 px-3 py-2 text-sm font-medium hover:bg-secondary"><FileText className="size-4" /> PDF</button>
-          <button className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-brand-1 to-brand-2 px-3 py-2 text-sm font-semibold text-white shadow-glow"><Download className="size-4" /> Download all</button>
-        </div>}
+      <PageHeader
+        title="Reports & Analytics"
+        subtitle="Data-driven insights generated from your real document uploads."
       />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <p className="text-sm font-semibold">Daily uploads</p><p className="text-xs text-muted-foreground mb-3">Last 30 days</p>
-          <div className="h-56"><ResponsiveContainer>
-            <AreaChart data={daily}>
-              <defs><linearGradient id="ru" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="oklch(0.55 0.22 275)" stopOpacity={0.5}/><stop offset="100%" stopColor="oklch(0.55 0.22 275)" stopOpacity={0}/></linearGradient></defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.01 260)" vertical={false} />
-              <XAxis dataKey="day" tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 10 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: "white", border: "1px solid oklch(0.92 0.01 260)", borderRadius: 12, fontSize: 12 }} />
-              <Area type="monotone" dataKey="uploads" stroke="oklch(0.55 0.22 275)" strokeWidth={2.5} fill="url(#ru)" />
-            </AreaChart>
-          </ResponsiveContainer></div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
+          <Loader2 className="size-5 animate-spin" />
+          <span className="text-sm">Loading analytics…</span>
+        </div>
+      ) : isEmpty ? (
+        <Card className="py-16 text-center">
+          <UploadCloud className="mx-auto size-10 opacity-30 mb-3" />
+          <p className="font-semibold text-foreground">No data yet</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Upload and process documents to populate analytics charts.
+          </p>
+          <Link
+            to="/dashboard/upload"
+            className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+          >
+            Upload Documents →
+          </Link>
         </Card>
-        <Card>
-          <p className="text-sm font-semibold">Processing time</p><p className="text-xs text-muted-foreground mb-3">Milliseconds · monthly avg</p>
-          <div className="h-56"><ResponsiveContainer>
-            <LineChart data={time}>
-              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.01 260)" vertical={false} />
-              <XAxis dataKey="m" tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 10 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: "white", border: "1px solid oklch(0.92 0.01 260)", borderRadius: 12, fontSize: 12 }} />
-              <Line type="monotone" dataKey="ms" stroke="oklch(0.58 0.24 300)" strokeWidth={2.5} dot={{ r: 3, fill: "oklch(0.58 0.24 300)" }} />
-            </LineChart>
-          </ResponsiveContainer></div>
-        </Card>
-        <Card>
-          <p className="text-sm font-semibold">Top categories</p><p className="text-xs text-muted-foreground mb-3">By document count</p>
-          <div className="h-56"><ResponsiveContainer>
-            <PieChart>
-              <Pie data={cats} dataKey="v" innerRadius={50} outerRadius={80} paddingAngle={4} stroke="none">
-                {cats.map((_,i)=><Cell key={i} fill={colors[i]} />)}
-              </Pie>
-              <Tooltip contentStyle={{ background: "white", border: "1px solid oklch(0.92 0.01 260)", borderRadius: 12, fontSize: 12 }} />
-            </PieChart>
-          </ResponsiveContainer></div>
-        </Card>
-        <Card>
-          <p className="text-sm font-semibold">Most active users</p><p className="text-xs text-muted-foreground mb-3">Uploads · this month</p>
-          <div className="h-56"><ResponsiveContainer>
-            <BarChart data={topUsers} layout="vertical" margin={{ left: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.01 260)" horizontal={false} />
-              <XAxis type="number" tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 10 }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="n" tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 11 }} axisLine={false} tickLine={false} width={120} />
-              <Tooltip contentStyle={{ background: "white", border: "1px solid oklch(0.92 0.01 260)", borderRadius: 12, fontSize: 12 }} />
-              <Bar dataKey="u" fill="oklch(0.55 0.22 275)" radius={[0, 8, 8, 0]} />
-            </BarChart>
-          </ResponsiveContainer></div>
-        </Card>
-      </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {/* Category Distribution Pie */}
+          <Card>
+            <p className="text-sm font-semibold">Category distribution</p>
+            <p className="text-xs text-muted-foreground mb-3">By document count (real data)</p>
+            <div className="h-56">
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={cats} dataKey="v" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={4} stroke="none">
+                    {cats.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ background: "white", border: "1px solid oklch(0.92 0.01 260)", borderRadius: 12, fontSize: 12 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-1 text-xs">
+              {cats.map((c, i) => (
+                <div key={c.name} className="flex items-center gap-1.5">
+                  <span className="size-2.5 rounded-sm" style={{ background: colors[i % colors.length] }} />
+                  <span className="text-muted-foreground truncate">{c.name}</span>
+                  <span className="ml-auto font-medium">{c.v}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Status Breakdown */}
+          <Card>
+            <p className="text-sm font-semibold">Processing status breakdown</p>
+            <p className="text-xs text-muted-foreground mb-3">Across all uploaded documents</p>
+            <div className="h-56">
+              <ResponsiveContainer>
+                <BarChart data={statusBars}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.01 260)" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: "white", border: "1px solid oklch(0.92 0.01 260)", borderRadius: 12, fontSize: 12 }} />
+                  <Bar dataKey="v" fill="oklch(0.55 0.22 275)" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          {/* Confidence Distribution */}
+          <Card>
+            <p className="text-sm font-semibold">Confidence distribution</p>
+            <p className="text-xs text-muted-foreground mb-3">Agent classification confidence buckets</p>
+            <div className="h-56">
+              <ResponsiveContainer>
+                <BarChart data={confBuckets}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.01 260)" vertical={false} />
+                  <XAxis dataKey="range" tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: "white", border: "1px solid oklch(0.92 0.01 260)", borderRadius: 12, fontSize: 12 }} />
+                  <Bar dataKey="count" fill="oklch(0.58 0.24 300)" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          {/* Folder Distribution */}
+          <Card>
+            <p className="text-sm font-semibold">Top routed folders</p>
+            <p className="text-xs text-muted-foreground mb-3">Documents routed by Agent 5</p>
+            <div className="h-56">
+              <ResponsiveContainer>
+                <BarChart data={folderBars} layout="vertical" margin={{ left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.01 260)" horizontal={false} />
+                  <XAxis type="number" tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="n" tick={{ fill: "oklch(0.5 0.03 260)", fontSize: 11 }} axisLine={false} tickLine={false} width={120} />
+                  <Tooltip contentStyle={{ background: "white", border: "1px solid oklch(0.92 0.01 260)", borderRadius: 12, fontSize: 12 }} />
+                  <Bar dataKey="u" fill="oklch(0.55 0.22 275)" radius={[0, 8, 8, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        </div>
+      )}
     </>
   );
 }

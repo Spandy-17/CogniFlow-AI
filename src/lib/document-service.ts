@@ -1,10 +1,11 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
-import { demoDocs, type DemoDoc, type DocStatus } from "./demo-data";
+import { PYTHON_BACKEND_URL } from "./python-backend";
+import { type DocStatus } from "./demo-data";
 
 export type DocumentRecord = {
   id: string;
-  userId?: string | null;
+  userId: string | null;
   name: string;
   cat: string;
   conf: number;
@@ -15,394 +16,373 @@ export type DocumentRecord = {
   pages: number;
   uploadedBy: string;
   extracted: string;
-  filePath?: string | null;
-  fileUrl?: string | null;
+  filePath: string | null;
+  fileUrl: string | null;
   validation: { rule: string; passed: boolean }[];
   timeline: { agent: string; detail: string; at: string; state: "done" | "active" | "failed" }[];
+  entities?: Record<string, unknown>;
+  summary?: string;
+  metrics?: Record<string, number>;
+  logs?: Record<string, { time: string; text: string; tone?: string }[]>;
+  matched_rule?: { id?: string; name?: string };
 };
 
-const LOCAL_STORAGE_KEY = "cogniflow_uploaded_documents_cache";
-
 function formatBytes(bytes: number, decimals = 1): string {
-  if (bytes === 0) return "0 B";
+  if (!bytes) return "0 B";
   const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
   const sizes = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
 }
 
-function formatTime(d: Date = new Date()): string {
-  return d.toTimeString().slice(0, 8);
+function formatDateAgo(value: string): string {
+  const date = new Date(value);
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-function formatDateAgo(d: Date = new Date()): string {
-  const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (diffSec < 60) return "just now";
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-  return `${Math.floor(diffSec / 86400)}d ago`;
+function mapDatabaseDocument(row: any): DocumentRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    cat: row.category || "Unclassified",
+    conf: Number(row.confidence) || 0,
+    status: (row.status as DocStatus) || "uploaded",
+    folder: row.folder || "Unassigned",
+    date: formatDateAgo(row.created_at),
+    size: row.file_size_formatted || (row.file_size ? formatBytes(row.file_size) : "—"),
+    pages: 1,
+    uploadedBy: "Member",
+    extracted: row.extracted_text || "",
+    filePath: row.file_path,
+    fileUrl: row.file_url,
+    validation: Array.isArray(row.validation_results) ? row.validation_results : [],
+    timeline: Array.isArray(row.timeline) ? row.timeline : [],
+  };
 }
 
-// Local cache helpers for immediate responsiveness & offline / schema fallback
-function getLocalCache(): DocumentRecord[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
+async function getCurrentUser() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw new Error(`Could not verify your Supabase session: ${error.message}`);
+  if (!data.user) throw new Error("Sign in to view the shared document library.");
+  return data.user;
+}
+
+function databaseError(action: string, error: { message: string; code?: string; hint?: string }): Error {
+  const details = [error.message, error.code ? `(${error.code})` : "", error.hint || ""]
+    .filter(Boolean)
+    .join(" ");
+  return new Error(`Could not ${action} from Supabase: ${details}`);
+}
+
+function sanitizePostgresText(value: string): string {
+  let output = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0 || (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d)) continue;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        output += value[index] + value[index + 1];
+        index += 1;
+      }
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) continue;
+    if (code === 0xfffe || code === 0xffff) continue;
+    output += value[index];
   }
+  return output;
 }
 
-function saveToLocalCache(doc: DocumentRecord) {
-  if (typeof window === "undefined") return;
-  try {
-    const current = getLocalCache().filter((d) => d.id !== doc.id);
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify([doc, ...current]));
-  } catch {
-    // Ignore storage quota
+function sanitizeJsonValue(value: unknown): unknown {
+  if (typeof value === "string") return sanitizePostgresText(value);
+  if (Array.isArray(value)) return value.map(sanitizeJsonValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [sanitizePostgresText(key), sanitizeJsonValue(item)]));
   }
+  return value;
 }
 
-function removeDocFromCache(id: string) {
-  if (typeof window === "undefined") return;
-  try {
-    const current = getLocalCache().filter((d) => d.id !== id);
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(current));
-  } catch {}
+async function addSignedFileUrl(doc: DocumentRecord, persistForUserId?: string): Promise<DocumentRecord> {
+  if (!doc.filePath) return doc;
+  const { data } = await supabase.storage.from("documents").createSignedUrl(doc.filePath, 3600);
+  const fileUrl = data?.signedUrl || doc.fileUrl;
+  if (data?.signedUrl && doc.fileUrl !== data.signedUrl && persistForUserId && doc.userId === persistForUserId) {
+    const { error } = await supabase
+      .from("documents")
+      .update({ file_url: data.signedUrl })
+      .eq("id", doc.id)
+      .eq("user_id", persistForUserId);
+    if (error) console.warn("[DocumentService] Could not backfill file_url:", error.message);
+  }
+  return { ...doc, fileUrl };
 }
 
-/**
- * Intelligent Multi-Agent Information Routing Simulation
- * Analyzes file name, type, and content to run OCR, Classification, Validation, and Routing agents.
- */
-function inferDocumentIntelligence(fileName: string, fileSize: number, fileType: string) {
-  const lower = fileName.toLowerCase();
+async function updateProcessingFields(
+  userId: string,
+  fields: {
+    id: string;
+    category: string;
+    confidence: number;
+    status: string;
+    folder: string;
+    extracted_text: string;
+    file_url?: string | null;
+    validation_results: unknown;
+    timeline: unknown;
+  }
+): Promise<any> {
+  const safeFields = {
+    ...fields,
+    category: sanitizePostgresText(fields.category),
+    status: sanitizePostgresText(fields.status),
+    folder: sanitizePostgresText(fields.folder),
+    extracted_text: sanitizePostgresText(fields.extracted_text),
+    validation_results: sanitizeJsonValue(fields.validation_results),
+    timeline: sanitizeJsonValue(fields.timeline),
+  };
+  const rpcResult = await supabase.rpc("complete_document_processing", {
+    p_document_id: safeFields.id,
+    p_category: safeFields.category,
+    p_confidence: safeFields.confidence,
+    p_status: safeFields.status,
+    p_folder: safeFields.folder,
+    p_extracted_text: safeFields.extracted_text,
+    p_file_url: safeFields.file_url || null,
+    p_validation_results: safeFields.validation_results as any,
+    p_timeline: safeFields.timeline as any,
+  });
+  if (!rpcResult.error && rpcResult.data) return rpcResult.data;
 
-  let cat = "Report";
-  let conf = 95.8;
-  let folder = "/Reports/2026";
-  let pages = Math.max(1, Math.round(fileSize / (150 * 1024)));
-  let extracted = "";
-  let validationRules: { rule: string; passed: boolean }[] = [];
-
-  if (lower.includes("cert") || lower.includes("diploma") || lower.includes("degree") || lower.includes("award")) {
-    cat = "Certificate";
-    conf = 98.6;
-    folder = "/Certificates/2026";
-    pages = 1;
-    extracted = `CERTIFICATE OF ACHIEVEMENT & VERIFICATION\n\nTitle: ${fileName.replace(/\.[^/.]+$/, "")}\nIssued Date: ${new Date().toISOString().slice(0, 10)}\nRecipient Verification ID: CF-${Math.floor(100000 + Math.random() * 900000)}\nDigital Signature: Verified (RSA-4096 cryptographically anchored)`;
-    validationRules = [
-      { rule: "Recipient identification verified", passed: true },
-      { rule: "Issuing authority signature authentic", passed: true },
-      { rule: "Date & certificate validity window", passed: true },
-      { rule: "Template integrity ≥ 95%", passed: true },
-    ];
-  } else if (lower.includes("invoice") || lower.includes("bill") || lower.includes("receipt") || lower.includes("payment")) {
-    cat = "Invoice";
-    conf = 97.2;
-    folder = "/Invoices/2026";
-    pages = Math.min(3, Math.max(1, pages));
-    extracted = `COMMERCIAL TAX INVOICE\n\nInvoice Reference: INV-${Date.now().toString().slice(-6)}\nBilled To: CogniFlow Enterprise Account\nTotal Amount: $${(Math.random() * 5000 + 200).toFixed(2)}\nTax Category: Standard (Reconciled)\nPayment Status: Pending Approval`;
-    validationRules = [
-      { rule: "Invoice number & tax ID valid", passed: true },
-      { rule: "Line item math cross-checked", passed: true },
-      { rule: "Vendor matching registered database", passed: true },
-    ];
-  } else if (lower.includes("contract") || lower.includes("agreement") || lower.includes("nda") || lower.includes("sla")) {
-    cat = "Contract";
-    conf = 99.1;
-    folder = "/Contracts";
-    pages = Math.max(4, pages);
-    extracted = `MUTUAL SERVICES & CONFIDENTIALITY AGREEMENT\n\nDocument: ${fileName}\nEffective Date: ${new Date().toLocaleDateString()}\nJurisdiction: Central Commercial\nSignatories: Both parties authenticated with digital identity.`;
-    validationRules = [
-      { rule: "Effective term & date specified", passed: true },
-      { rule: "All executing parties identified", passed: true },
-      { rule: "Governing law & liability clauses intact", passed: true },
-    ];
-  } else if (lower.includes("transcript") || lower.includes("grade") || lower.includes("score")) {
-    cat = "Transcript";
-    conf = 94.5;
-    folder = "/Transcripts";
-    pages = Math.max(1, Math.min(4, pages));
-    extracted = `OFFICIAL ACADEMIC TRANSCRIPT\n\nRecord File: ${fileName}\nInstitution: CogniFlow Academic Registry\nCredits Completed: 120 / Cumulative GPA: 3.89\nStatus: Official seal verified.`;
-    validationRules = [
-      { rule: "Registrar watermark detected", passed: true },
-      { rule: "Accredited grading scale verified", passed: true },
-    ];
-  } else {
-    // Default Report / General Document
-    cat = "Report";
-    conf = 96.4;
-    folder = "/Reports";
-    extracted = `EXECUTIVE DOCUMENT ANALYSIS REPORT\n\nSource: ${fileName} (${formatBytes(fileSize)})\nIndexed at: ${new Date().toLocaleString()}\nContent Summary: Multi-section document processed by CogniFlow autonomous AI pipeline.`;
-    validationRules = [
-      { rule: "Structure & header hierarchy detected", passed: true },
-      { rule: "Legibility threshold passed (≥ 90%)", passed: true },
-      { rule: "Security / malware scan clear", passed: true },
-    ];
+  const rpcError = rpcResult.error;
+  const missingFunction = rpcError?.code === "PGRST202" || rpcError?.message?.includes("complete_document_processing");
+  if (!missingFunction) {
+    // Some saved records still point at legacy public URLs. In that case the
+    // Storage RLS policy can reject signed URLs even though the original file
+    // is readable. Keep the uploader-scoped update fallback for those rows.
+    const urlOnlyRecord = await supabase
+      .from("documents")
+      .select("id, file_path, file_url")
+      .eq("id", safeFields.id)
+      .maybeSingle();
+    if (!urlOnlyRecord.data?.file_path && urlOnlyRecord.data?.file_url) {
+      // Continue to the owner-scoped update below for URL-only legacy uploads.
+    } else {
+      throw databaseError("save agent processing status", rpcError);
+    }
   }
 
-  return { cat, conf, folder, pages, extracted, validationRules };
+  // Older database deployments may not have the processing RPC installed yet.
+  // This owner-scoped update safely keeps processing working for the uploader.
+  const { data, error } = await supabase
+    .from("documents")
+    .update({
+      category: safeFields.category,
+      confidence: safeFields.confidence,
+      status: safeFields.status,
+      folder: safeFields.folder,
+      extracted_text: safeFields.extracted_text,
+      ...(safeFields.file_url ? { file_url: safeFields.file_url } : {}),
+      validation_results: safeFields.validation_results as any,
+      timeline: safeFields.timeline as any,
+    })
+    .eq("id", safeFields.id)
+    .eq("user_id", userId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw new Error(`Could not save processing results: ${error.message}`);
+  if (!data) {
+    throw new Error(
+      "This saved file belongs to another account. Apply supabase/migrations/20261029_document_processing_rpc.sql in Supabase so authenticated workspace members can save AI processing results."
+    );
+  }
+  return data;
 }
 
-/**
- * Upload a document to Supabase Storage and PostgreSQL database,
- * executing the multi-agent AI pipeline.
- */
-export async function uploadAndProcessDocument(
+/** Save a user upload and its metadata. AI processing is started separately. */
+export async function saveUploadedDocument(
   file: File,
   user: User | null,
   onProgress?: (stage: string, progressPercent: number) => void
-): Promise<{ doc: DocumentRecord; dbSaved: boolean; storageSaved: boolean; warning?: string }> {
-  const docId = crypto.randomUUID();
-  const userName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Authorized User";
-  const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-  const storagePath = `${user?.id || "public"}/${Date.now()}_${sanitizedName}`;
+): Promise<DocumentRecord> {
+  const currentUser = user || await getCurrentUser();
+  const storagePath = `${currentUser.id}/${crypto.randomUUID()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
 
-  let storageSaved = false;
-  let fileUrl: string | null = null;
-  let warningMessage: string | undefined;
+  onProgress?.("Uploading original file…", 10);
+  const { data: stored, error: storageError } = await supabase.storage
+    .from("documents")
+    .upload(storagePath, file, { cacheControl: "3600", upsert: false });
+  if (storageError || !stored) throw new Error(storageError?.message || "The file could not be saved to storage.");
 
-  // Step 1: Uploading to Supabase Storage Bucket ('documents')
-  onProgress?.("Uploading file…", 15);
-  try {
-    const { data: storageData, error: storageError } = await supabase.storage
-      .from("documents")
-      .upload(storagePath, file, {
-        cacheControl: "3600",
-        upsert: true,
-      });
-
-    if (storageError) {
-      console.warn("[DocumentService] Supabase Storage upload skipped/failed:", storageError.message);
-      warningMessage = `Storage upload notice: ${storageError.message}. Database record will still be stored.`;
-    } else if (storageData) {
-      storageSaved = true;
-      const { data: pubData } = supabase.storage.from("documents").getPublicUrl(storagePath);
-      fileUrl = pubData?.publicUrl || null;
-    }
-  } catch (err: any) {
-    console.warn("[DocumentService] Storage bucket unreachable:", err?.message);
-    warningMessage = `Storage not configured yet in Supabase. Run SQL in DBeaver to enable storage.`;
+  const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+    .from("documents")
+    .createSignedUrl(storagePath, 7 * 24 * 60 * 60);
+  if (signedUrlError) {
+    await supabase.storage.from("documents").remove([storagePath]);
+    throw new Error(`File uploaded, but its database URL could not be generated: ${signedUrlError.message}`);
   }
 
-  // Step 2: Multi-Agent AI Pipeline
-  onProgress?.("OCR Agent: Extracting text…", 38);
-  await new Promise((r) => setTimeout(r, 600));
-
-  onProgress?.("Classification Agent: Analyzing category…", 65);
-  await new Promise((r) => setTimeout(r, 600));
-
-  const intel = inferDocumentIntelligence(file.name, file.size, file.type);
-
-  onProgress?.("Validation Agent: Verifying rules…", 82);
-  await new Promise((r) => setTimeout(r, 500));
-
-  onProgress?.(`Routing Agent: Directing to ${intel.folder}…`, 95);
-  await new Promise((r) => setTimeout(r, 400));
-
-  const now = new Date();
-  const timeline = [
-    {
-      agent: "Upload",
-      detail: `File received · ${formatBytes(file.size)}`,
-      at: formatTime(new Date(now.getTime() - 2500)),
-      state: "done" as const,
-    },
-    {
-      agent: "OCR Agent",
-      detail: `Extracted ${intel.pages} page${intel.pages > 1 ? "s" : ""} · OCR accuracy ${(intel.conf + 0.5).toFixed(1)}%`,
-      at: formatTime(new Date(now.getTime() - 1700)),
-      state: "done" as const,
-    },
-    {
-      agent: "Classification Agent",
-      detail: `${intel.cat} · ${intel.conf}% confidence`,
-      at: formatTime(new Date(now.getTime() - 1100)),
-      state: "done" as const,
-    },
-    {
-      agent: "Validation Agent",
-      detail: `Template passed · ${intel.validationRules.length}/${intel.validationRules.length} checks verified`,
-      at: formatTime(new Date(now.getTime() - 500)),
-      state: "done" as const,
-    },
-    {
-      agent: "Routing Agent",
-      detail: `Assigned & stored in ${intel.folder}`,
-      at: formatTime(now),
-      state: "done" as const,
-    },
-  ];
-
-  const finalDoc: DocumentRecord = {
-    id: docId,
-    userId: user?.id ?? null,
-    name: file.name,
-    cat: intel.cat,
-    conf: intel.conf,
-    status: "routed",
-    folder: intel.folder,
-    date: "just now",
-    size: formatBytes(file.size),
-    pages: intel.pages,
-    uploadedBy: userName,
-    extracted: intel.extracted,
-    filePath: storagePath,
-    fileUrl: fileUrl,
-    validation: intel.validationRules,
-    timeline,
-  };
-
-  // Step 3: Insert into PostgreSQL database table ('documents')
-  let dbSaved = false;
-  try {
-    const { error: dbError } = await supabase.from("documents").insert({
-      id: docId,
-      user_id: user?.id ?? null,
+  const id = crypto.randomUUID();
+  const { data: initialRow, error: initialDbError } = await supabase
+    .from("documents")
+    .insert({
+      id,
+      user_id: currentUser.id,
       name: file.name,
       file_path: storagePath,
-      file_url: fileUrl,
+      file_url: signedUrlData.signedUrl,
       file_size: file.size,
       file_size_formatted: formatBytes(file.size),
       file_type: file.type || "application/octet-stream",
-      category: intel.cat,
-      confidence: intel.conf,
-      status: "routed",
-      folder: intel.folder,
-      extracted_text: intel.extracted,
-      validation_results: intel.validationRules,
-      timeline: timeline,
+      category: "Unclassified",
+      confidence: 0,
+      status: "uploaded",
+      folder: "Unassigned",
+      extracted_text: "",
+      validation_results: [],
+      timeline: [],
+    })
+    .select("*")
+    .single();
+
+  if (initialDbError || !initialRow) {
+    await supabase.storage.from("documents").remove([storagePath]);
+    throw databaseError("save uploaded document", initialDbError || { message: "No document row was returned." });
+  }
+
+  onProgress?.("Saved to My Documents · awaiting AI processing", 100);
+  return addSignedFileUrl(mapDatabaseDocument(initialRow), currentUser.id);
+}
+
+/** Explicitly run one saved upload through the Python agents and persist results. */
+export async function processSavedDocument(doc: DocumentRecord): Promise<DocumentRecord> {
+  const currentUser = await getCurrentUser();
+
+  let fileBlob: Blob | null = null;
+  let storageMessage = "No file path was stored.";
+  if (doc.filePath) {
+    const download = await supabase.storage.from("documents").download(doc.filePath);
+    fileBlob = download.data;
+    storageMessage = download.error?.message || storageMessage;
+  }
+  if (!fileBlob && doc.fileUrl) {
+    try {
+      const response = await fetch(doc.fileUrl);
+      if (response.ok) fileBlob = await response.blob();
+      else storageMessage = `File URL returned HTTP ${response.status}.`;
+    } catch (error) {
+      storageMessage = error instanceof Error ? error.message : storageMessage;
+    }
+  }
+  if (!fileBlob) throw new Error(`Could not read the stored original file: ${storageMessage}`);
+
+  const userName = currentUser.user_metadata?.full_name || currentUser.email?.split("@")[0] || "Member";
+  const upload = new File([fileBlob], doc.name, { type: fileBlob.type || "application/octet-stream" });
+  const formData = new FormData();
+  formData.append("file", upload);
+  formData.append("user_name", userName);
+  formData.append("user_id", currentUser.id);
+
+  await updateProcessingFields(currentUser.id, {
+    id: doc.id,
+    category: doc.cat,
+    confidence: doc.conf,
+    status: "processing",
+    folder: doc.folder,
+    extracted_text: doc.extracted,
+    file_url: doc.fileUrl,
+    validation_results: doc.validation,
+    timeline: doc.timeline,
+  });
+
+  try {
+    const response = await fetch(`${PYTHON_BACKEND_URL}/api/process`, {
+      method: "POST",
+      body: formData,
+      signal: AbortSignal.timeout(120000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.document) {
+      const stage = payload.stage ? `${payload.stage}: ` : "";
+      throw new Error(`${stage}${payload.error || `AI backend failed (${response.status}).`}`);
+    }
+
+    const agentDoc = payload.document;
+    const updated = await updateProcessingFields(currentUser.id, {
+      id: doc.id,
+      category: agentDoc.cat || "Unclassified",
+      confidence: Number(agentDoc.conf) || 0,
+      status: agentDoc.status || "routed",
+      folder: agentDoc.folder || "Unassigned",
+      extracted_text: agentDoc.extracted || "",
+      file_url: doc.fileUrl,
+      validation_results: agentDoc.validation || [],
+      timeline: agentDoc.timeline || [],
     });
 
-    if (dbError) {
-      console.warn("[DocumentService] Supabase PostgreSQL insert notice:", dbError);
-      warningMessage = dbError.message.includes("does not exist") || dbError.code === "PGRST205"
-        ? "Table 'documents' not found in PostgreSQL. Please execute the provided SQL script in DBeaver to activate full cloud database saving!"
-        : dbError.message;
-    } else {
-      dbSaved = true;
+    return {
+      ...mapDatabaseDocument(updated),
+      pages: agentDoc.pages || 1,
+      entities: agentDoc.entities || {},
+      summary: agentDoc.summary || "",
+      metrics: agentDoc.metrics || {},
+      logs: agentDoc.logs || {},
+      matched_rule: agentDoc.matched_rule || {},
+    };
+  } catch (error) {
+    try {
+      await updateProcessingFields(currentUser.id, {
+        id: doc.id,
+        category: doc.cat,
+        confidence: doc.conf,
+        status: "error",
+        folder: doc.folder,
+        extracted_text: doc.extracted,
+        file_url: doc.fileUrl,
+        validation_results: doc.validation,
+        timeline: doc.timeline,
+      });
+    } catch (updateError) {
+      console.error("[DocumentService] Could not persist processing failure:", updateError);
     }
-  } catch (err: any) {
-    console.warn("[DocumentService] Database unreachable:", err);
-    warningMessage = "Database query failed. File cached locally. Run the migration script in DBeaver to enable database persistence.";
+    throw error;
   }
-
-  // Always save to local cache for instant UI feedback and graceful offline/migration handling
-  saveToLocalCache(finalDoc);
-
-  onProgress?.("Completed ✓", 100);
-  return { doc: finalDoc, dbSaved, storageSaved, warning: warningMessage };
 }
 
-/**
- * Fetch documents from PostgreSQL database, merging with local storage cache and demo data.
- */
+/** Return all persisted documents visible to authenticated workspace members. */
 export async function fetchAllDocuments(): Promise<DocumentRecord[]> {
-  const localList = getLocalCache();
-
-  try {
-    const { data, error } = await supabase
-      .from("documents")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (!error && data && data.length > 0) {
-      const dbDocs: DocumentRecord[] = data.map((d: any) => ({
-        id: d.id,
-        userId: d.user_id,
-        name: d.name,
-        cat: d.category || "Unclassified",
-        conf: Number(d.confidence) || 0,
-        status: (d.status as DocStatus) || "routed",
-        folder: d.folder || "Unassigned",
-        date: formatDateAgo(new Date(d.created_at)),
-        size: d.file_size_formatted || (d.file_size ? formatBytes(d.file_size) : "—"),
-        pages: 1,
-        uploadedBy: "Member",
-        extracted: d.extracted_text || "",
-        filePath: d.file_path,
-        fileUrl: d.file_url,
-        validation: Array.isArray(d.validation_results) ? d.validation_results : [],
-        timeline: Array.isArray(d.timeline) ? d.timeline : [],
-      }));
-
-      // Merge DB docs with local cache (avoid duplicates by id), followed by demo docs
-      const combined = [...dbDocs];
-      for (const loc of localList) {
-        if (!combined.some((c) => c.id === loc.id)) {
-          combined.push(loc);
-        }
-      }
-      return [...combined, ...demoDocs];
-    }
-  } catch (err) {
-    console.warn("[DocumentService] Could not fetch from PostgreSQL:", err);
-  }
-
-  // Fallback to local cache + demoDocs if DB table is not yet created
-  const uniqueLocal = localList.filter((loc) => !demoDocs.some((d) => d.id === loc.id));
-  return [...uniqueLocal, ...demoDocs];
+  const user = await getCurrentUser();
+  const { data, error } = await supabase
+    .from("documents")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw databaseError("load documents", error);
+  return Promise.all((data || []).map((row) => addSignedFileUrl(mapDatabaseDocument(row), user.id)));
 }
 
-/**
- * Get a single document by ID, querying PostgreSQL table or demo/local cache.
- */
 export async function fetchDocumentById(docId: string): Promise<DocumentRecord | undefined> {
-  // Check local cache first
-  const local = getLocalCache().find((d) => d.id === docId);
-  if (local) return local;
-
-  // Check demo docs
-  const demo = demoDocs.find((d) => d.id === docId);
-  if (demo) return demo;
-
-  // Check Supabase PostgreSQL
-  try {
-    const { data, error } = await supabase
-      .from("documents")
-      .select("*")
-      .eq("id", docId)
-      .maybeSingle();
-
-    if (!error && data) {
-      return {
-        id: data.id,
-        userId: data.user_id,
-        name: data.name,
-        cat: data.category || "Unclassified",
-        conf: Number(data.confidence) || 0,
-        status: (data.status as DocStatus) || "routed",
-        folder: data.folder || "Unassigned",
-        date: formatDateAgo(new Date(data.created_at)),
-        size: data.file_size_formatted || (data.file_size ? formatBytes(data.file_size) : "—"),
-        pages: 1,
-        uploadedBy: "Member",
-        extracted: data.extracted_text || "",
-        filePath: data.file_path,
-        fileUrl: data.file_url,
-        validation: Array.isArray(data.validation_results) ? (data.validation_results as any) : [],
-        timeline: Array.isArray(data.timeline) ? (data.timeline as any) : [],
-      };
-    }
-  } catch {}
-
-  return undefined;
+  const user = await getCurrentUser();
+  const { data, error } = await supabase
+    .from("documents")
+    .select("*")
+    .eq("id", docId)
+    .maybeSingle();
+  if (error) throw databaseError("load document", error);
+  return data ? addSignedFileUrl(mapDatabaseDocument(data), user.id) : undefined;
 }
 
-/**
- * Delete a document from Supabase DB and local cache
- */
 export async function deleteDocument(docId: string, filePath?: string | null): Promise<void> {
-  removeDocFromCache(docId);
-  try {
-    if (filePath) {
-      await supabase.storage.from("documents").remove([filePath]);
-    }
-    await supabase.from("documents").delete().eq("id", docId);
-  } catch (err) {
-    console.warn("[DocumentService] Delete error:", err);
+  const user = await getCurrentUser();
+  const { error } = await supabase.from("documents").delete().eq("id", docId).eq("user_id", user.id);
+  if (error) throw new Error(error.message);
+  if (filePath) {
+    const { error: storageError } = await supabase.storage.from("documents").remove([filePath]);
+    if (storageError) console.warn("[DocumentService] Storage cleanup failed:", storageError.message);
   }
 }
