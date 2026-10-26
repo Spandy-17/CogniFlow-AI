@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { MessageCircle, Send, X, Bot, User as UserIcon } from "lucide-react";
 import { assistantReply } from "@/lib/demo-data";
+import { fetchAllDocuments, type DocumentRecord } from "@/lib/document-service";
 
 type Msg = { role: "user" | "assistant"; text: string };
 
 const suggestions = [
-    "Where is Certificate_Ada.pdf?",
-    "Why was this rejected?",
-    "What is the confidence score?",
-    "Which folders were assigned?",
+    "Show my recent documents",
+    "Which documents need review?",
+    "What folders contain my documents?",
 ];
 
 function Markdownish({ text }: { text: string }) {
@@ -32,6 +32,7 @@ export function AiAssistant() {
     const [open, setOpen] = useState(false);
     const [input, setInput] = useState("");
     const [thinking, setThinking] = useState(false);
+    const [docs, setDocs] = useState<DocumentRecord[]>([]);
     const [msgs, setMsgs] = useState<Msg[]>([
         {
             role: "assistant",
@@ -44,6 +45,10 @@ export function AiAssistant() {
         endRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [msgs, open, thinking]);
 
+    useEffect(() => {
+        if (open) fetchAllDocuments().then(setDocs).catch(() => setDocs([]));
+    }, [open]);
+
     const send = (text: string) => {
         const q = text.trim();
         if (!q || thinking) return;
@@ -51,7 +56,7 @@ export function AiAssistant() {
         setInput("");
         setThinking(true);
         setTimeout(() => {
-            setMsgs((m) => [...m, { role: "assistant", text: assistantReply(q) }]);
+            setMsgs((m) => [...m, { role: "assistant", text: assistantReply(q, docs) }]);
             setThinking(false);
         }, 650);
     };

@@ -1,0 +1,137 @@
+[
+  {
+    "id": "rule_quarantine_fail",
+    "name": "Validation Failure Quarantine",
+    "description": "Route documents failing critical compliance checks to quarantine",
+    "priority": 1,
+    "enabled": true,
+    "condition": {
+      "field": "validation_status",
+      "operator": "equals",
+      "value": "FAIL"
+    },
+    "target_category": "Review",
+    "target_subfolder": "Quarantine",
+    "target_folder": "/Needs_Review/Quarantine"
+  },
+  {
+    "id": "rule_low_confidence",
+    "name": "Low Confidence Review",
+    "description": "Flag documents with classification confidence under 75% for manual review",
+    "priority": 2,
+    "enabled": true,
+    "condition": {
+      "field": "confidence",
+      "operator": "less_than",
+      "value": 75.0
+    },
+    "target_category": "Review",
+    "target_subfolder": "Low_Confidence",
+    "target_folder": "/Needs_Review/Low_Confidence"
+  },
+  {
+    "id": "rule_high_value_invoice",
+    "name": "High Value Invoices",
+    "description": "Direct invoices totaling $5,000 or greater into dedicated High-Value audit archive",
+    "priority": 5,
+    "enabled": true,
+    "condition": {
+      "field": "entities.total_amount",
+      "operator": "numeric_greater_than",
+      "value": 5000.0
+    },
+    "target_category": "Invoice",
+    "target_subfolder": "High_Value",
+    "target_folder": "/Invoices/High_Value"
+  },
+  {
+    "id": "rule_invoice_standard",
+    "name": "Standard Invoice Year Routing",
+    "description": "Organize verified commercial invoices by current calendar year",
+    "priority": 10,
+    "enabled": true,
+    "condition": {
+      "field": "category",
+      "operator": "equals",
+      "value": "Invoice"
+    },
+    "target_category": "Invoice",
+    "target_subfolder": "{year}",
+    "target_folder": "/Invoices/{year}"
+  },
+  {
+    "id": "rule_certificate_standard",
+    "name": "Certificate & Accreditation Routing",
+    "description": "File certified academic and professional credentials by year",
+    "priority": 10,
+    "enabled": true,
+    "condition": {
+      "field": "category",
+      "operator": "equals",
+      "value": "Certificate"
+    },
+    "target_category": "Certificate",
+    "target_subfolder": "{year}",
+    "target_folder": "/Certificates/{year}"
+  },
+  {
+    "id": "rule_contract_standard",
+    "name": "Legal Agreement & NDA Routing",
+    "description": "Archive mutual NDAs, master service agreements, and corporate contracts",
+    "priority": 10,
+    "enabled": true,
+    "condition": {
+      "field": "category",
+      "operator": "equals",
+      "value": "Contract"
+    },
+    "target_category": "Contract",
+    "target_subfolder": null,
+    "target_folder": "/Contracts"
+  },
+  {
+    "id": "rule_transcript_standard",
+    "name": "Official Academic Transcript Routing",
+    "description": "Index student transcripts, GPA scorecards, and university registrar files",
+    "priority": 10,
+    "enabled": true,
+    "condition": {
+      "field": "category",
+      "operator": "equals",
+      "value": "Transcript"
+    },
+    "target_category": "Transcript",
+    "target_subfolder": null,
+    "target_folder": "/Transcripts"
+  },
+  {
+    "id": "rule_report_standard",
+    "name": "Executive & Operational Reports",
+    "description": "Sort analytical summaries, Q1/Q4 reports, and audit documents by year",
+    "priority": 10,
+    "enabled": true,
+    "condition": {
+      "field": "category",
+      "operator": "equals",
+      "value": "Report"
+    },
+    "target_category": "Report",
+    "target_subfolder": "{year}",
+    "target_folder": "/Reports/{year}"
+  },
+  {
+    "id": "rule_default_fallback",
+    "name": "Default Archive Fallback",
+    "description": "Catch-all routing for uncategorized or miscellaneous documents",
+    "priority": 99,
+    "enabled": true,
+    "condition": {
+      "field": "always",
+      "operator": "true",
+      "value": true
+    },
+    "target_category": "Other",
+    "target_subfolder": "{year}",
+    "target_folder": "/Archive/{year}"
+  }
+]

@@ -6,6 +6,7 @@ import {
   UploadCloud, RefreshCw, Trash2
 } from "lucide-react";
 import { fetchAllDocuments, deleteDocument, type DocumentRecord } from "@/lib/document-service";
+import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/dashboard/documents")({
@@ -19,25 +20,32 @@ export const Route = createFileRoute("/dashboard/documents")({
 });
 
 const statusStyles: Record<string, { label: string; cls: string; Icon: typeof CheckCircle2 }> = {
+  uploaded: { label: "Uploaded", cls: "bg-secondary text-muted-foreground", Icon: Clock },
   routed: { label: "Routed", cls: "bg-success/15 text-success", Icon: CheckCircle2 },
   review: { label: "Needs review", cls: "bg-warning/15 text-warning", Icon: Clock },
   processing: { label: "Processing", cls: "bg-primary/10 text-primary", Icon: Clock },
   rejected: { label: "Rejected", cls: "bg-destructive/10 text-destructive", Icon: XCircle },
+  error: { label: "Processing failed", cls: "bg-destructive/10 text-destructive", Icon: XCircle },
 };
 
 function DocumentsPage() {
+  const { user } = useAuth();
   const [docs, setDocs] = useState<DocumentRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selectedCat, setSelectedCat] = useState("All");
 
   const loadDocs = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await fetchAllDocuments();
       setDocs(data);
-    } catch {
-      toast.error("Failed to load documents");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not load documents.";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -71,12 +79,13 @@ function DocumentsPage() {
       return matchesQuery && matchesCat;
     });
   }, [docs, query, selectedCat]);
+  const categories = ["All", ...new Set(docs.map((doc) => doc.cat).filter(Boolean))];
 
   return (
     <>
       <PageHeader
         title="My Documents"
-        subtitle="Every document processed and saved to your PostgreSQL database."
+        subtitle="Shared library of files uploaded to the database by signed-in workspace members."
         actions={
           <div className="flex items-center gap-2">
             <button
@@ -95,6 +104,14 @@ function DocumentsPage() {
         }
       />
 
+      {loadError && (
+        <Card className="mb-4 border-destructive/40 bg-destructive/5">
+          <p className="text-sm font-semibold text-destructive">Could not connect to your documents table</p>
+          <p className="mt-1 break-words text-xs text-muted-foreground">{loadError}</p>
+          <p className="mt-2 text-xs text-muted-foreground">Confirm the Supabase project configuration and shared authenticated-read policy.</p>
+        </Card>
+      )}
+
       <Card className="!p-0 overflow-hidden border border-border/70">
         <div className="flex flex-wrap items-center gap-3 border-b border-border/60 p-4">
           <div className="relative flex-1 min-w-64">
@@ -108,7 +125,7 @@ function DocumentsPage() {
           </div>
 
           <div className="flex flex-wrap gap-1 text-xs">
-            {["All", "Certificate", "Report", "Invoice", "Contract", "Transcript"].map((t) => (
+            {categories.map((t) => (
               <button
                 key={t}
                 onClick={() => setSelectedCat(t)}
@@ -143,7 +160,7 @@ function DocumentsPage() {
                   <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
                     <FileText className="mx-auto size-8 opacity-40 mb-2" />
                     <p className="font-medium text-foreground">No documents found</p>
-                    <p className="text-xs mt-1">Upload a document or adjust your search filter</p>
+                    <p className="text-xs mt-1">{query || selectedCat !== "All" ? "Adjust your search filter." : "No uploaded documents are currently saved in the shared database."}</p>
                     <Link
                       to="/dashboard/upload"
                       className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition"
@@ -202,13 +219,15 @@ function DocumentsPage() {
                       <td className="text-muted-foreground text-xs font-mono">{d.folder}</td>
                       <td className="text-muted-foreground text-xs">{d.date}</td>
                       <td>
-                        <button
-                          onClick={(e) => handleDelete(e, d.id, d.filePath)}
-                          title="Delete document"
-                          className="text-muted-foreground hover:text-destructive p-1 rounded-md hover:bg-destructive/10 transition"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
+                        {d.userId === user?.id && (
+                          <button
+                            onClick={(e) => handleDelete(e, d.id, d.filePath)}
+                            title="Delete document"
+                            className="text-muted-foreground hover:text-destructive p-1 rounded-md hover:bg-destructive/10 transition"
+                          >
+                              <Trash2 className="size-3.5" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

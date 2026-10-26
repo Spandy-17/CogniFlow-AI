@@ -115,7 +115,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      complete_document_processing: {
+        Args: {
+          p_document_id: string
+          p_category: string
+          p_confidence: number
+          p_status: string
+          p_folder: string
+          p_extracted_text: string
+          p_file_url: string | null
+          p_validation_results: Json
+          p_timeline: Json
+        }
+        Returns: Database["public"]["Tables"]["documents"]["Row"]
+      }
     }
     Enums: {
       [_ in never]: never

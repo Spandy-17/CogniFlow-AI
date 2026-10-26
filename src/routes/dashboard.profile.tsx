@@ -6,6 +6,7 @@ import {
   MapPin,
   Calendar,
   FileText,
+  FileX2,
   CheckCircle2,
   Sparkles,
   Pencil,
@@ -18,6 +19,7 @@ import {
 import { toast } from "sonner";
 import { useAuth, displayName } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
+import type { DocumentRecord } from "@/lib/document-service";
 
 export const Route = createFileRoute("/dashboard/profile")({ component: ProfilePage });
 
@@ -33,56 +35,65 @@ export interface UserProfile {
 
 const PROFILE_STORAGE_KEY = "cogniflow_user_profile";
 
-const DEFAULT_PROFILE: UserProfile = {
-  fullName: "Ada Lovelace",
-  role: "Workspace Admin",
-  email: "ada@cogniflow.ai",
-  location: "London, UK",
-  joined: "Joined Jan 2026",
-  bio: "Lead AI System Architect overseeing multi-agent document intelligence and auto-routing pipelines.",
-};
-
-const stats = [
-  { label: "Documents uploaded", value: "1,284" },
-  { label: "Approved", value: "1,196" },
-  { label: "Avg. confidence", value: "97.4%" },
-  { label: "Automation saved", value: "312h" },
-];
-
-const activity = [
-  { Icon: CheckCircle2, cls: "text-success bg-success/15", t: "Approved 24 documents", when: "2h ago" },
-  { Icon: FileText, cls: "text-primary bg-primary/10", t: "Uploaded Certificate_Ada.pdf", when: "yesterday" },
-  { Icon: Sparkles, cls: "text-brand-2 bg-brand-2/10", t: "Enabled auto-routing", when: "2d ago" },
-];
-
 function ProfilePage() {
   const { user } = useAuth();
-  const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
+  const [profile, setProfile] = useState<UserProfile>({
+    fullName: user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User",
+    role: "Workspace Member",
+    email: user?.email || "",
+    location: "",
+    joined: `Joined ${new Date(user?.created_at || Date.now()).toLocaleDateString("en", { month: "long", year: "numeric" })}`,
+    bio: "",
+  });
   const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState<UserProfile>(DEFAULT_PROFILE);
+  const [draft, setDraft] = useState<UserProfile>(profile);
   const [saving, setSaving] = useState(false);
+  const [docs, setDocs] = useState<DocumentRecord[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     try {
       const stored = localStorage.getItem(PROFILE_STORAGE_KEY);
+      const baseProfile: UserProfile = {
+        fullName: user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User",
+        role: "Workspace Member",
+        email: user?.email || "",
+        location: "",
+        joined: `Joined ${new Date(user?.created_at || Date.now()).toLocaleDateString("en", { month: "long", year: "numeric" })}`,
+        bio: "",
+      };
       if (stored) {
         const parsed = JSON.parse(stored) as UserProfile;
         setProfile(parsed);
         setDraft(parsed);
-      } else if (user) {
-        const initialProfile: UserProfile = {
-          ...DEFAULT_PROFILE,
-          fullName: displayName(user) !== "Guest" ? displayName(user) : DEFAULT_PROFILE.fullName,
-          email: user.email || DEFAULT_PROFILE.email,
-        };
-        setProfile(initialProfile);
-        setDraft(initialProfile);
+      } else {
+        setProfile(baseProfile);
+        setDraft(baseProfile);
       }
     } catch {
       // ignore parsing error
     }
   }, [user]);
+
+  useEffect(() => {
+    import("@/lib/document-service").then((m) => m.fetchAllDocuments()).then(setDocs).catch(() => setDocs([]));
+  }, []);
+
+  const totalDocs = docs.length;
+  const approved = docs.filter((d) => d.status === "routed").length;
+  const avgConf = totalDocs > 0 ? (docs.reduce((s, d) => s + (d.conf || 0), 0) / totalDocs).toFixed(1) : "—";
+  const stats = [
+    { label: "Documents uploaded", value: totalDocs > 0 ? String(totalDocs) : "—" },
+    { label: "Approved / Routed", value: approved > 0 ? String(approved) : "—" },
+    { label: "Avg. confidence", value: totalDocs > 0 ? `${avgConf}%` : "—" },
+    { label: "Categories", value: totalDocs > 0 ? String(new Set(docs.map((d) => d.cat)).size) : "—" },
+  ];
+  const activity = docs.slice(0, 5).map((d) => ({
+    Icon: d.status === "routed" ? CheckCircle2 : d.status === "rejected" ? FileX2 : FileText,
+    cls: d.status === "routed" ? "text-success bg-success/15" : d.status === "rejected" ? "text-destructive bg-destructive/10" : "text-primary bg-primary/10",
+    t: d.name,
+    when: d.date,
+  }));
 
   const handleStartEditing = () => {
     setDraft({ ...profile });

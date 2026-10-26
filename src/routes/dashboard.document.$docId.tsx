@@ -1,10 +1,11 @@
 import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
 import { motion } from "motion/react";
 import {
-    ArrowLeft, Download, Trash2, RefreshCw, FileText, CheckCircle2, XCircle,
+    ArrowLeft, Download, Trash2, FileText, CheckCircle2, XCircle,
     Clock, FolderTree, Cpu, HardDrive, User, ExternalLink
 } from "lucide-react";
 import { Card, PageHeader } from "@/components/DashboardShell";
+import { useAuth } from "@/hooks/useAuth";
 import { statusMeta } from "@/lib/demo-data";
 import { fetchDocumentById, deleteDocument, type DocumentRecord } from "@/lib/document-service";
 import { toast } from "sonner";
@@ -46,6 +47,7 @@ function DocNotFound() {
 
 function DocumentDetails() {
     const { doc } = Route.useLoaderData();
+    const { user } = useAuth();
     const navigate = useNavigate();
     const s = statusMeta[doc.status] || statusMeta.routed;
 
@@ -60,15 +62,7 @@ function DocumentDetails() {
         if (doc.fileUrl) {
             window.open(doc.fileUrl, "_blank");
         } else {
-            // Download extracted text as fallback
-            const blob = new Blob([doc.extracted || "CogniFlow Document"], { type: "text/plain" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = doc.name.replace(/\.[^/.]+$/, "") + "_extracted.txt";
-            a.click();
-            URL.revokeObjectURL(url);
-            toast.success("Extracted text downloaded");
+            toast.error("Original uploaded file is unavailable.");
         }
     };
 
@@ -89,18 +83,14 @@ function DocumentDetails() {
                         >
                             <Download className="size-4" /> Download
                         </button>
-                        <button
-                            onClick={() => toast.info("Document queued for agent re-processing")}
-                            className="inline-flex items-center gap-2 rounded-xl border border-border bg-background/60 px-3 py-2 text-sm font-medium hover:bg-secondary transition"
-                        >
-                            <RefreshCw className="size-4" /> Reprocess
-                        </button>
-                        <button
-                            onClick={handleDelete}
-                            className="inline-flex items-center gap-2 rounded-xl border border-destructive/40 px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition"
-                        >
-                            <Trash2 className="size-4" /> Delete
-                        </button>
+                        {doc.userId === user?.id && (
+                            <button
+                                onClick={handleDelete}
+                                className="inline-flex items-center gap-2 rounded-xl border border-destructive/40 px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition"
+                            >
+                                <Trash2 className="size-4" /> Delete
+                            </button>
+                        )}
                     </>
                 }
             />
