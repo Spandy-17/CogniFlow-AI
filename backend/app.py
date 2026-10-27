@@ -12,6 +12,7 @@ from backend.config import SERVER_HOST, SERVER_PORT
 from backend.orchestrator.pipeline import pipeline
 from backend.services.rules_service import rules_service
 from backend.services.storage_service import storage_service
+from backend.services.compliance_service import compliance_service
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
@@ -49,6 +50,18 @@ def process_document():
     user_id = request.form.get("user_id")
     if not user_id:
         return jsonify({"error": "An authenticated user ID is required."}), 401
+
+    # Check duplicate unless explicitly allowed
+    allow_dup = request.form.get("allow_duplicate", "false").lower() == "true"
+    if not allow_dup:
+        matched = compliance_service.check_duplicate_by_name(uploaded_file.filename)
+        if matched:
+            folder_info = f"filed in {matched.get('folder')}" if matched.get("folder") else "already registered"
+            return jsonify({
+                "error": f"File already exists: '{uploaded_file.filename}' has already been uploaded ({folder_info}). Duplicate upload blocked.",
+                "duplicate": True,
+                "matched_doc_id": matched.get("doc_id"),
+            }), 409
 
     try:
         saved = storage_service.save_upload(uploaded_file, uploaded_file.filename)
@@ -131,6 +144,76 @@ def delete_rule(rule_id: str):
     return jsonify({"message": "Rule removed successfully"})
 
 
+# ---------------------------------------------------------------------
+# Advanced Compliance & Security Endpoints
+# ---------------------------------------------------------------------
+
+@app.route("/api/compliance/summary", methods=["GET"])
+def get_compliance_summary():
+    """Return aggregated security, duplicate detection, and expiration statistics."""
+    summary = compliance_service.get_compliance_summary()
+    return jsonify(summary)
+
+
+@app.route("/api/compliance/quarantine", methods=["GET"])
+def get_quarantined_documents():
+    """Retrieve all documents flagged or quarantined by security/compliance policies."""
+    items = compliance_service.load_quarantine_registry()
+    status_filter = request.args.get("status")
+    if status_filter:
+        items = [q for q in items if q.get("status") == status_filter]
+    return jsonify({
+        "quarantined_documents": items,
+        "total": len(items),
+    })
+
+
+@app.route("/api/compliance/duplicates", methods=["GET"])
+def get_duplicate_registry():
+    """List tracked document cryptographic hashes and detected duplicate records."""
+    registry = compliance_service.load_hash_registry()
+    quarantine_items = compliance_service.load_quarantine_registry()
+    duplicates = [q for q in quarantine_items if q.get("reason") == "DUPLICATE_DOCUMENT"]
+    return jsonify({
+        "tracked_documents": len(registry),
+        "duplicates_detected": duplicates,
+        "total_duplicates": len(duplicates),
+    })
+
+
+@app.route("/api/compliance/check-duplicate", methods=["POST"])
+def check_duplicate_preupload():
+    """Pre-upload check if a file with this name or hash already exists."""
+    data = request.get_json() or {}
+    filename = data.get("filename")
+    if not filename:
+        return jsonify({"error": "Filename is required"}), 400
+    matched = compliance_service.check_duplicate_by_name(filename)
+    if matched:
+        folder_info = f"in {matched.get('folder')}" if matched.get("folder") else "in system"
+        return jsonify({
+            "exists": True,
+            "message": f"File already exists: '{filename}' has already been uploaded ({folder_info}).",
+            "matched_document": matched,
+        })
+    return jsonify({"exists": False})
+
+
+@app.route("/api/compliance/quarantine/release/<doc_id>", methods=["POST"])
+def release_quarantined_document(doc_id: str):
+    """Release a document from quarantine after manual administrative review."""
+    data = request.get_json() or {}
+    reviewer = data.get("reviewer") or "Authorized Reviewer"
+    released = compliance_service.release_from_quarantine(doc_id, reviewer=reviewer)
+    if not released:
+        return jsonify({"error": "Document not found in quarantine registry"}), 404
+    return jsonify({
+        "message": f"Document {doc_id} successfully released from quarantine by {reviewer}.",
+        "doc_id": doc_id,
+        "status": "released",
+    })
+
+
 if __name__ == "__main__":
     print(f"[*] Starting CogniFlow Multi-Agent Backend on http://{SERVER_HOST}:{SERVER_PORT}")
-    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=False)
+    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=True)

@@ -46,7 +46,14 @@ function ProcessingCenter() {
     try {
       const latest = await fetchAllDocuments();
       setDocuments(latest);
-      setSelectedIds((current) => current.filter((id) => latest.some((doc) => doc.id === id && doc.status !== "processing")));
+      setSelectedIds((current) => {
+        const valid = current.filter((id) => latest.some((doc) => doc.id === id && doc.status !== "processing"));
+        if (valid.length > 0) return valid;
+        // Pre-select documents needing processing by default so button is never locked
+        const needsProcess = latest.filter((d) => d.status === "uploaded" || d.status === "error" || d.status === "review");
+        if (needsProcess.length > 0) return needsProcess.map((d) => d.id);
+        return latest.length > 0 ? [latest[0].id] : [];
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load saved documents.");
     } finally {
@@ -71,8 +78,23 @@ function ProcessingCenter() {
   };
 
   const processSelected = async () => {
-    if (!backendHealth || processingId || selectedIds.length === 0) return;
-    const queue = pendingDocuments.filter((doc) => selectedIds.includes(doc.id));
+    if (!backendHealth) {
+      toast.error("AI Backend is offline. Please start the backend service first.");
+      return;
+    }
+    if (processingId) return;
+
+    let targetIds = selectedIds;
+    if (targetIds.length === 0) {
+      if (pendingDocuments.length === 0) {
+        toast.info("No documents waiting for processing.");
+        return;
+      }
+      targetIds = pendingDocuments.map((doc) => doc.id);
+      setSelectedIds(targetIds);
+    }
+
+    const queue = pendingDocuments.filter((doc) => targetIds.includes(doc.id));
     for (const doc of queue) {
       setProcessingId(doc.id);
       setActiveDocument(null);
@@ -174,9 +196,21 @@ function ProcessingCenter() {
                 <button onClick={() => setSelectedIds(selectedIds.length === pendingDocuments.length ? [] : pendingDocuments.map((doc) => doc.id))} disabled={Boolean(processingId)} className="text-xs font-semibold text-primary hover:underline disabled:opacity-50">
                   {selectedIds.length === pendingDocuments.length ? "Clear selection" : "Select all"}
                 </button>
-                <span className="text-xs text-muted-foreground">{selectedIds.length} selected</span>
-                <button onClick={() => void processSelected()} disabled={!backendHealth || processingId !== null || selectedIds.length === 0} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-brand-1 to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-glow transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50">
-                  {processingId ? <><Loader2 className="size-4 animate-spin" /> Processing…</> : <><Zap className="size-4" /> Process selected</>}
+                <button
+                  onClick={() => void processSelected()}
+                  disabled={Boolean(processingId) || !backendHealth}
+                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-brand-1 to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-glow transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {processingId ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" /> Processing…
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="size-4" />
+                      {selectedIds.length > 0 ? `Process selected (${selectedIds.length})` : "Process all documents"}
+                    </>
+                  )}
                 </button>
               </div>
             </>

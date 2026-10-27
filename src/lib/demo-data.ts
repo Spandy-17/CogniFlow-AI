@@ -6,6 +6,7 @@ export const statusMeta: Record<DocStatus, { label: string; cls: string }> = {
   review: { label: "Needs review", cls: "bg-warning/15 text-warning" },
   processing: { label: "Processing", cls: "bg-primary/10 text-primary" },
   rejected: { label: "Rejected", cls: "bg-destructive/10 text-destructive" },
+  error: { label: "Processing failed", cls: "bg-destructive/10 text-destructive" },
 };
 
 /** Rule-based assistant grounded in the user's actual uploaded documents. */

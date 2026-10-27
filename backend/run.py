@@ -16,4 +16,4 @@ if __name__ == "__main__":
     print(f"  Server URL: http://localhost:{SERVER_PORT}")
     print("=" * 65)
     
-    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=False)
+    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=True)

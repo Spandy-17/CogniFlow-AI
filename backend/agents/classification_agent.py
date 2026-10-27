@@ -10,6 +10,11 @@ FILENAME_CUES = {
     "Contract": ("contract", "agreement", "nda", "lease"),
     "Transcript": ("transcript", "marksheet", "grade_report", "academic_record"),
     "Report": ("report", "annual_report", "activity_report", "department_report", "analysis"),
+    "Data": (
+        "data", "dataset", "students", "faculty", "roster", "attendance", "records",
+        "sheet", "spreadsheet", "table", "participants", "enrollment", "metrics",
+        "export", "database", "analytics", "activity_data", "tabular", "log", "entries",
+    ),
 }
 
 TEXT_CUES = {
@@ -37,6 +42,12 @@ TEXT_CUES = {
         "methodology", "findings", "recommendations", "reporting period",
         "annual performance", "survey results",
     ),
+    "Data": (
+        "sheet:", "faculty id", "faculty name", "activity type", "activity title",
+        "roll no", "roll number", "phone number", "student name", "student list",
+        "current course", "s.no", "serial no", "hours", "status", "dataset",
+        "record count", "row id", "column", "data sheet", "participants",
+    ),
 }
 
 ACADEMIC_RESULT_CUES = (
@@ -52,7 +63,7 @@ def _contains_phrase(text: str, phrase: str) -> bool:
 
 
 class ClassificationAgent(BaseAgent):
-    """Classify using specific filename and document-content evidence."""
+    """Classify using specific filename, file type, and document-content evidence."""
 
     def __init__(self):
         super().__init__(
@@ -63,7 +74,8 @@ class ClassificationAgent(BaseAgent):
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         text = (state.get("extracted_text") or "").lower()
-        filename = (state.get("original_file_name") or state.get("file_name") or "").lower()
+        raw_filename = state.get("original_file_name") or state.get("file_name") or ""
+        filename = raw_filename.lower()
         normalized_filename = re.sub(r"[^a-z0-9]+", " ", filename)
 
         self.log("Comparing document text and filename against specific type evidence…", "info")
@@ -78,16 +90,33 @@ class ClassificationAgent(BaseAgent):
             # A single specific phrase is meaningful; repeated boilerplate is capped.
             scores[category] += min(len(matched), 4) * 3.0
 
-        # Student lists and spreadsheets should not become certificates merely
-        # because they contain names, schools, or degree/program references.
-        if scores["Certificate"] and not any(
-            _contains_phrase(text, cue)
-            for cue in ("certificate of", "this is to certify", "certifies that", "certificate id", "certificate number")
-        ):
-            scores["Certificate"] = max(0.0, scores["Certificate"] - 5.0)
+        # Structural cues for tabular datasets and spreadsheets
+        is_spreadsheet = any(
+            filename.endswith(ext)
+            for ext in (".xlsx", ".xls", ".csv", ".tsv", ".ods")
+        )
+        has_table_structure = text.count("|") >= 3 or "sheet:" in text or "\t" in text
 
-        # Student rosters are not certificates or transcripts. Transcript
-        # classification requires result/grade evidence, unless named explicitly.
+        if is_spreadsheet:
+            scores["Data"] += 14.0
+        elif has_table_structure and any(
+            _contains_phrase(normalized_filename, cue.replace("_", " ")) for cue in FILENAME_CUES["Data"]
+        ):
+            scores["Data"] += 10.0
+        elif has_table_structure and any(_contains_phrase(text, cue) for cue in TEXT_CUES["Data"]):
+            scores["Data"] += 8.0
+
+        # Student lists and spreadsheets should never become certificates merely
+        # because they contain names, schools, or degree/program references.
+        has_certificate_cues = any(
+            _contains_phrase(text, cue)
+            for cue in ("certificate of", "this is to certify", "certifies that", "certificate id", "certificate number", "credential awarded")
+        )
+        if not has_certificate_cues:
+            scores["Certificate"] = 0.0
+
+        # Student rosters and data sheets are not certificates or transcripts.
+        # Transcript classification requires explicit naming or strong grade/gpa proof.
         explicit_transcript = any(
             _contains_phrase(normalized_filename, cue.replace("_", " "))
             for cue in ("transcript", "marksheet", "grade_report", "academic_record")
@@ -95,15 +124,17 @@ class ClassificationAgent(BaseAgent):
         academic_result_evidence = sum(1 for cue in ACADEMIC_RESULT_CUES if _contains_phrase(text, cue))
         if explicit_transcript:
             scores["Transcript"] += 8.0
-        elif (
-            academic_result_evidence >= 2
-            and sum(1 for cue in ACADEMIC_ROW_LABELS if _contains_phrase(text, cue)) >= 1
-        ) or (
-            sum(1 for cue in ACADEMIC_TABLE_CUES if _contains_phrase(text, cue)) >= 3
-            and any(separator in text for separator in ("|", "\t", ","))
+        elif not is_spreadsheet and (
+            (
+                academic_result_evidence >= 2
+                and sum(1 for cue in ACADEMIC_ROW_LABELS if _contains_phrase(text, cue)) >= 1
+            ) or (
+                sum(1 for cue in ACADEMIC_TABLE_CUES if _contains_phrase(text, cue)) >= 3
+                and any(separator in text for separator in ("|", "\t", ","))
+            )
         ):
             scores["Transcript"] += max(6.0, min(academic_result_evidence, 5) * 2.0)
-        elif any(_contains_phrase(normalized_filename, term) for term in ("student", "students", "roster", "register")):
+        else:
             scores["Transcript"] = 0.0
 
         ranked: List[Tuple[str, float]] = sorted(scores.items(), key=lambda item: item[1], reverse=True)
@@ -119,8 +150,10 @@ class ClassificationAgent(BaseAgent):
             # Don't manufacture high confidence from a lone generic keyword.
             share = top_score / total_score if total_score else 0.0
             margin = top_score - second_score
-            confidence = round(min(93.0, max(40.0, 45.0 + min(top_score * 2.0, 30.0) + min(margin * 1.5, 18.0))), 1)
-            if margin < 2.0:
+            confidence = round(min(95.0, max(45.0, 50.0 + min(top_score * 2.0, 30.0) + min(margin * 1.5, 18.0))), 1)
+            if top_category == "Data":
+                confidence = max(confidence, 88.5)
+            elif margin < 2.0:
                 confidence = min(confidence, 69.0)
                 self.log(f"Ambiguous evidence: {top_category} vs {second_category}; flagging for review.", "warn")
 

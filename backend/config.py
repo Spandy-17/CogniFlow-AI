@@ -16,6 +16,7 @@ CATEGORY_FOLDERS = {
     "Contract": ROUTED_DIR / "Contracts",
     "Transcript": ROUTED_DIR / "Transcripts",
     "Report": ROUTED_DIR / "Reports",
+    "Data": ROUTED_DIR / "Data",
     "Review": ROUTED_DIR / "Needs_Review",
     "Other": ROUTED_DIR / "Archive",
 }

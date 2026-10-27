@@ -10,10 +10,55 @@ RULES_FILE = STORAGE_DIR / "routing_rules.json"
 
 DEFAULT_RULES = [
     {
+        "id": "rule_security_threat",
+        "name": "Security Threat Quarantine",
+        "description": "Immediately quarantine documents flagged with malware, macros, or scripts",
+        "priority": 1,
+        "enabled": True,
+        "condition": {
+            "field": "security.threat_detected",
+            "operator": "equals",
+            "value": True
+        },
+        "target_category": "Review",
+        "target_subfolder": "Quarantine",
+        "target_folder": "/Needs_Review/Quarantine"
+    },
+    {
+        "id": "rule_duplicate_quarantine",
+        "name": "Duplicate Document Isolation",
+        "description": "Route duplicate documents (identical SHA-256 or text match) to duplicates folder",
+        "priority": 1,
+        "enabled": True,
+        "condition": {
+            "field": "security.is_duplicate",
+            "operator": "equals",
+            "value": True
+        },
+        "target_category": "Review",
+        "target_subfolder": "Duplicates",
+        "target_folder": "/Needs_Review/Duplicates"
+    },
+    {
+        "id": "rule_expired_quarantine",
+        "name": "Expired Document Review",
+        "description": "Route expired certificates, contracts, and invoices to dedicated audit review",
+        "priority": 1,
+        "enabled": True,
+        "condition": {
+            "field": "security.is_expired",
+            "operator": "equals",
+            "value": True
+        },
+        "target_category": "Review",
+        "target_subfolder": "Expired",
+        "target_folder": "/Needs_Review/Expired"
+    },
+    {
         "id": "rule_quarantine_fail",
         "name": "Validation Failure Quarantine",
         "description": "Route documents failing critical compliance checks to quarantine",
-        "priority": 1,
+        "priority": 2,
         "enabled": True,
         "condition": {
             "field": "validation_status",
@@ -28,7 +73,7 @@ DEFAULT_RULES = [
         "id": "rule_low_confidence",
         "name": "Low Confidence Review",
         "description": "Flag documents with classification confidence under 75% for manual review",
-        "priority": 2,
+        "priority": 3,
         "enabled": True,
         "condition": {
             "field": "confidence",
@@ -130,6 +175,36 @@ DEFAULT_RULES = [
         "target_folder": "/Reports/{year}"
     },
     {
+        "id": "rule_data_standard",
+        "name": "Dataset & Spreadsheet Routing",
+        "description": "Organize verified datasets, spreadsheets, rosters, and data tables by year",
+        "priority": 10,
+        "enabled": True,
+        "condition": {
+            "field": "category",
+            "operator": "equals",
+            "value": "Data"
+        },
+        "target_category": "Data",
+        "target_subfolder": "{year}",
+        "target_folder": "/Data/{year}"
+    },
+    {
+        "id": "rule_spreadsheet_format",
+        "name": "Spreadsheet Format Routing",
+        "description": "Direct Excel (.xlsx, .xls) and CSV datasets into Data archive",
+        "priority": 12,
+        "enabled": True,
+        "condition": {
+            "field": "file_name",
+            "operator": "regex",
+            "value": r"\.(xlsx|xls|csv|tsv)$"
+        },
+        "target_category": "Data",
+        "target_subfolder": "{year}",
+        "target_folder": "/Data/{year}"
+    },
+    {
         "id": "rule_default_fallback",
         "name": "Default Archive Fallback",
         "description": "Catch-all routing for uncategorized or miscellaneous documents",
@@ -165,6 +240,14 @@ class RulesService:
         try:
             with open(RULES_FILE, "r", encoding="utf-8") as f:
                 rules = json.load(f)
+                existing_ids = {r.get("id") for r in rules}
+                updated = False
+                for d in DEFAULT_RULES:
+                    if d["id"] not in existing_ids:
+                        rules.append(d)
+                        updated = True
+                if updated:
+                    self.save_rules(rules)
                 return sorted(rules, key=lambda r: r.get("priority", 50))
         except Exception as e:
             print(f"[RulesService] Error reading rules file: {e}")

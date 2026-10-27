@@ -12,6 +12,7 @@ from backend.agents.extraction_agent import EntityExtractionAgent
 from backend.agents.validation_agent import ValidationAgent
 from backend.agents.routing_agent import RoutingAgent
 from backend.services.storage_service import format_bytes
+from backend.services.compliance_service import compliance_service
 
 class MultiAgentPipeline:
     """
@@ -286,8 +287,15 @@ class MultiAgentPipeline:
             "timeline": timeline,
             "logs": self.tasks[task_id]["logs"],
             "physical_path": state.get("physical_path", ""),
+            "security": state.get("security", {}),
             "created_at": datetime.now().isoformat(),
         }
+
+        # Register document in compliance cryptographic registry
+        try:
+            compliance_service.register_document(doc_record)
+        except Exception as e:
+            print(f"[Pipeline] Warning: Compliance registration failed: {e}")
 
         # Update final task status
         self.tasks[task_id].update({

@@ -7,7 +7,7 @@ import {
   ArrowRight, Copy, Check, AlertCircle, RefreshCw, Layers, ShieldCheck, Cpu
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { saveUploadedDocument, type DocumentRecord } from "@/lib/document-service";
+import { saveUploadedDocument, checkExistingDocument, type DocumentRecord } from "@/lib/document-service";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -31,6 +31,7 @@ type UploadingItem = {
   doc?: DocumentRecord;
   dbSaved?: boolean;
   error?: string;
+  file?: File;
 };
 
 const SQL_MIGRATION = `-- CogniFlow-AI Database Schema
@@ -125,6 +126,7 @@ function UploadPage() {
   const { user } = useAuth();
   const [items, setItems] = useState<UploadingItem[]>([]);
   const [drag, setDrag] = useState(false);
+  const [allowOverwrite, setAllowOverwrite] = useState(false);
   const [showDbGuide, setShowDbGuide] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
   const [dbStatus, setDbStatus] = useState<"checking" | "connected" | "needs_migration">("checking");
@@ -160,30 +162,24 @@ function UploadPage() {
     }
   };
 
-  const handleFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const handleReplaceDuplicate = async (item: UploadingItem) => {
+    if (!item.file) return;
+    const f = item.file;
+    const tempId = item.id;
 
-    const fileArray = Array.from(files);
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id === tempId
+          ? { ...it, status: "uploading", progress: 10, stage: "Replacing previous version…", error: undefined }
+          : it
+      )
+    );
 
-    for (const f of fileArray) {
-      const tempId = crypto.randomUUID();
-      const fileSize = (f.size / 1024 / 1024).toFixed(1) + " MB";
-
-      // Add to UI queue
-      setItems((prev) => [
-        {
-          id: tempId,
-          name: f.name,
-          size: fileSize,
-          progress: 5,
-          stage: "Uploading to cloud storage…",
-          status: "uploading",
-        },
-        ...prev,
-      ]);
-
-      try {
-        const savedDoc = await saveUploadedDocument(f, user, (stageName, percent) => {
+    try {
+      const savedDoc = await saveUploadedDocument(
+        f,
+        user,
+        (stageName, percent) => {
           setItems((prev) =>
             prev.map((it) =>
               it.id === tempId
@@ -196,7 +192,119 @@ function UploadPage() {
                 : it
             )
           );
+        },
+        true
+      );
+
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === tempId
+            ? {
+                ...it,
+                id: savedDoc.id,
+                progress: 100,
+                stage: "Saved in My Documents · ready for AI processing",
+                status: "done",
+                doc: savedDoc,
+                dbSaved: true,
+              }
+            : it
+        )
+      );
+
+      toast.success(`"${f.name}" replaced and saved in My Documents.`);
+    } catch (err: any) {
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === tempId
+            ? { ...it, status: "error", error: err?.message || "Replace failed", stage: "Failed" }
+            : it
+        )
+      );
+      toast.error(`Replace error: ${err?.message || "Unknown error"}`);
+    }
+  };
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const fileArray = Array.from(files);
+    const seenInBatch = new Set<string>();
+
+    for (const f of fileArray) {
+      const lowerName = f.name.toLowerCase();
+      if (seenInBatch.has(lowerName)) {
+        toast.error(`Duplicate file: "${f.name}" was selected multiple times in this batch.`);
+        continue;
+      }
+      seenInBatch.add(lowerName);
+
+      const tempId = crypto.randomUUID();
+      const fileSize = (f.size / 1024 / 1024).toFixed(1) + " MB";
+
+      // Immediate pre-check: verify if document already exists before uploading unless overwrite is active
+      const existing = await checkExistingDocument(f.name);
+      if (existing && !allowOverwrite) {
+        const dest =
+          existing.folder && existing.folder !== "Unassigned"
+            ? `already organized in ${existing.folder}`
+            : `saved with status "${existing.status}"`;
+        const errMsg = `File already exists: "${f.name}" has already been uploaded (${dest}).`;
+
+        setItems((prev) => [
+          {
+            id: tempId,
+            name: f.name,
+            size: fileSize,
+            progress: 100,
+            stage: "File already exists",
+            status: "error",
+            error: errMsg,
+            file: f,
+          },
+          ...prev,
+        ]);
+
+        toast.error(errMsg, {
+          description: "Click 'Replace & Re-upload' on the card below, or enable 'Overwrite existing' toggle.",
         });
+        continue;
+      }
+
+      // Add to UI queue
+      setItems((prev) => [
+        {
+          id: tempId,
+          name: f.name,
+          size: fileSize,
+          progress: 5,
+          stage: "Uploading to cloud storage…",
+          status: "uploading",
+          file: f,
+        },
+        ...prev,
+      ]);
+
+      try {
+        const savedDoc = await saveUploadedDocument(
+          f,
+          user,
+          (stageName, percent) => {
+            setItems((prev) =>
+              prev.map((it) =>
+                it.id === tempId
+                  ? {
+                      ...it,
+                      progress: percent,
+                      stage: stageName,
+                      status: percent >= 100 ? "done" : percent >= 30 ? "processing" : "uploading",
+                    }
+                  : it
+              )
+            );
+          },
+          allowOverwrite
+        );
 
         // Upload is persisted; AI processing is an explicit later action.
         setItems((prev) =>
@@ -217,6 +325,7 @@ function UploadPage() {
 
         toast.success(`"${f.name}" saved in My Documents. Go to AI Processing when you're ready to process it.`);
       } catch (err: any) {
+        const isDuplicate = err?.message?.includes("File already exists");
         setItems((prev) =>
           prev.map((it) =>
             it.id === tempId
@@ -224,12 +333,19 @@ function UploadPage() {
                   ...it,
                   status: "error",
                   error: err?.message || "Upload failed",
-                  stage: "Failed",
+                  stage: isDuplicate ? "File already exists" : "Failed",
+                  file: f,
                 }
               : it
           )
         );
-        toast.error(`Upload error: ${err?.message || "Unknown error"}`);
+        if (isDuplicate) {
+          toast.error(err.message, {
+            description: "Click 'Replace & Re-upload' on the file card below to update it.",
+          });
+        } else {
+          toast.error(`Upload error: ${err?.message || "Unknown error"}`);
+        }
       }
     }
   };
@@ -361,6 +477,19 @@ function UploadPage() {
             </span>
           </div>
         </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 bg-secondary/20 px-5 py-3 text-xs">
+          <label className="flex items-center gap-2 cursor-pointer select-none text-muted-foreground hover:text-foreground transition">
+            <input
+              type="checkbox"
+              checked={allowOverwrite}
+              onChange={(e) => setAllowOverwrite(e.target.checked)}
+              className="size-4 rounded accent-primary cursor-pointer"
+            />
+            <span className="font-medium text-foreground">Overwrite / replace existing document if duplicate filename is found</span>
+          </label>
+          <span className="text-[11px] text-muted-foreground">Supported: PDF, DOCX, XLSX, TXT, PNG, JPG</span>
+        </div>
       </Card>
 
       {/* Uploaded Items List */}
@@ -400,12 +529,12 @@ function UploadPage() {
                     <div className="mt-2 flex items-center gap-3">
                       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                         <motion.div
-                          className="h-full rounded-full bg-gradient-to-r from-brand-1 to-brand-2"
+                          className={`h-full rounded-full ${it.status === "error" ? "bg-destructive" : "bg-gradient-to-r from-brand-1 to-brand-2"}`}
                           animate={{ width: `${it.progress}%` }}
                           transition={{ duration: 0.3 }}
                         />
                       </div>
-                      <span className="text-xs font-medium text-muted-foreground w-44 text-right truncate">
+                      <span className={`text-xs font-medium w-48 text-right truncate ${it.status === "error" ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
                         {it.stage}
                       </span>
                     </div>
@@ -416,12 +545,18 @@ function UploadPage() {
                   {it.status === "done" && it.doc && (
                     <div className="flex items-center gap-2">
                       <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2.5 py-1 text-xs font-medium text-success">
-                        <CheckCircle2 className="size-3.5" /> {it.doc.cat}
+                        <CheckCircle2 className="size-3.5" /> Saved
                       </span>
+                      <Link
+                        to="/dashboard/ai-processing"
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-br from-brand-1 to-brand-2 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:opacity-95 transition"
+                      >
+                        <Cpu className="size-3.5" /> Process with AI
+                      </Link>
                       <Link
                         to="/dashboard/document/$docId"
                         params={{ docId: it.doc.id }}
-                        className="inline-flex items-center gap-1 rounded-xl bg-primary/10 hover:bg-primary/20 px-3 py-1 text-xs font-medium text-primary transition"
+                        className="inline-flex items-center gap-1 rounded-xl bg-primary/10 hover:bg-primary/20 px-3 py-1.5 text-xs font-medium text-primary transition"
                       >
                         Inspect <ArrowRight className="size-3" />
                       </Link>
@@ -429,9 +564,26 @@ function UploadPage() {
                   )}
 
                   {it.status === "error" && (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-destructive">
-                      <AlertCircle className="size-3.5" /> Failed
-                    </span>
+                    <div className="flex flex-col items-end gap-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-destructive bg-destructive/10 px-2 py-0.5 rounded-full">
+                          <AlertCircle className="size-3.5" /> {it.stage === "File already exists" ? "Duplicate Blocked" : "Failed"}
+                        </span>
+                        {it.file && it.stage === "File already exists" && (
+                          <button
+                            onClick={() => handleReplaceDuplicate(it)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground shadow-sm hover:opacity-90 transition"
+                          >
+                            <RefreshCw className="size-3" /> Replace & Re-upload
+                          </button>
+                        )}
+                      </div>
+                      {it.error && (
+                        <span className="text-[11px] text-muted-foreground max-w-[280px] text-right truncate" title={it.error}>
+                          {it.error}
+                        </span>
+                      )}
+                    </div>
                   )}
 
                   <button

@@ -1,0 +1,123 @@
+[
+  {
+    "doc_id": "92d8880d-26f4-46dc-943b-e1dc85b71145",
+    "file_name": "20261027_181843_sample_faculty_activity_data.xlsx",
+    "sha256": "acc5363fe020b1c61b8f65ef4d7e090a1608f35f751358c4babb1683ce78e211",
+    "content_hash": "b1dc25bcb882ede01ba448755356979d39ae7aa306d4e7f2db469968fb13bce2",
+    "category": "Data",
+    "user_name": "Test User",
+    "uploaded_at": "2026-10-27T18:18:44.118579",
+    "folder": "/Data/2026",
+    "status": "routed"
+  },
+  {
+    "doc_id": "ec7c25aa-9538-4017-bff0-a1d175608343",
+    "file_name": "20261027_181853_23WH1A66_students.xlsx",
+    "sha256": "8152273449a2978bc77453efd5772af39a927bc61a5a3af3b5bbcf727d25a46f",
+    "content_hash": "73178f95309ce65f1b3ed465a39d4ec6b91195a81944ba1607257d0be39fb415",
+    "category": "Data",
+    "user_name": "Test User",
+    "uploaded_at": "2026-10-27T18:18:53.144280",
+    "folder": "/Data/2026",
+    "status": "routed"
+  },
+  {
+    "doc_id": "doc_test_1",
+    "file_name": "valid_cert.txt",
+    "sha256": "ed38a63c6b21425f0f9ac60bd493a8eb307891de2d0a3459f7ec7de9cd0f9766",
+    "content_hash": "666416cbd5c94110f4cbff6711148ee597ea29e3187697255c55e3b852a9c163",
+    "category": "Certificate",
+    "user_name": "Test User",
+    "uploaded_at": "2026-10-27T18:25:57.985215",
+    "folder": "/Certificates/2026",
+    "status": "routed"
+  },
+  {
+    "doc_id": "bda163bb-13aa-4396-a0d8-d21c29a450c2",
+    "file_name": "20261027_183637_sample_research_paper.pdf",
+    "sha256": "40b6bcb77785bdecd97ef52cfeadd4abef0c58eaed56399211f15e6634fc912d",
+    "content_hash": "c8331d0f23d0e90944420490b8e3cfff0d2262db221bfafb8ef88c300d905816",
+    "category": "Report",
+    "user_name": "MAHIMA MEGHANA PATOJU",
+    "uploaded_at": "2026-10-27T18:36:50.156211",
+    "folder": "/Needs_Review/Low_Confidence",
+    "status": "routed"
+  },
+  {
+    "doc_id": "20755dcd-e707-44c7-b4ab-7c62cfac7c60",
+    "file_name": "20261027_183653_sample_faculty_workshop_certificate_2.pdf",
+    "sha256": "b729c880d5fb3d1be1f650ea8a36af6242a20dd54af9f452b039478b37773f39",
+    "content_hash": "7c39e1da71866c9e9e5db6730ea792dd38d9e2678e5f25f8d5b9f0bdc0ccffd1",
+    "category": "Certificate",
+    "user_name": "MAHIMA MEGHANA PATOJU",
+    "uploaded_at": "2026-10-27T18:36:56.827410",
+    "folder": "/Certificates/2026",
+    "status": "routed"
+  },
+  {
+    "doc_id": "3fcf36eb-5c85-44fc-b054-636993c3d7af",
+    "file_name": "20261027_183659_sample_faculty_seminar.pdf",
+    "sha256": "a88512e6f0964459f088163fd9a4407713e5a1c0c2539352b083ffa45a0c0d9d",
+    "content_hash": "ff8aa3737d0a1c8acfc55fb68732055567f3db7b02d7dcffa6280f44b056787e",
+    "category": "Data",
+    "user_name": "MAHIMA MEGHANA PATOJU",
+    "uploaded_at": "2026-10-27T18:36:59.778946",
+    "folder": "/Data/2026",
+    "status": "routed"
+  },
+  {
+    "doc_id": "68ce6be3-3266-4d45-ada6-39c547f18d86",
+    "file_name": "20261027_183701_sample_faculty_certificate.pdf",
+    "sha256": "b7de15bd5e397b7719d42e4d599ee49cd0b43cb302fcee4d1996d2ce6e672d22",
+    "content_hash": "99628ce64f004d476ea42fbb7eb32124b434e5ce4226baa50609739d456ef05f",
+    "category": "Certificate",
+    "user_name": "MAHIMA MEGHANA PATOJU",
+    "uploaded_at": "2026-10-27T18:37:01.323201",
+    "folder": "/Certificates/2026",
+    "status": "routed"
+  },
+  {
+    "doc_id": "3aeeb4cd-d4d4-490f-8ad8-0ea4cc9cfc39",
+    "file_name": "20261027_183703_sample_faculty_activity_data.xlsx",
+    "sha256": "acc5363fe020b1c61b8f65ef4d7e090a1608f35f751358c4babb1683ce78e211",
+    "content_hash": "b1dc25bcb882ede01ba448755356979d39ae7aa306d4e7f2db469968fb13bce2",
+    "category": "Data",
+    "user_name": "MAHIMA MEGHANA PATOJU",
+    "uploaded_at": "2026-10-27T18:37:03.756313",
+    "folder": "/Needs_Review/Quarantine",
+    "status": "review"
+  },
+  {
+    "doc_id": "f7d9e037-54d5-4b5e-8544-6647203dafd0",
+    "file_name": "20261027_183705_sample_department_annual_report.docx",
+    "sha256": "5c7f606707804dcdc099371b09b1b5e5efd752e424ba25cdfacac8a1405ab814",
+    "content_hash": "9dc95654ba19edaa06891ee40620f8bffd6ee361a6c60aa46c2bfbbdb869e947",
+    "category": "Report",
+    "user_name": "MAHIMA MEGHANA PATOJU",
+    "uploaded_at": "2026-10-27T18:37:06.003068",
+    "folder": "/Reports/2026",
+    "status": "routed"
+  },
+  {
+    "doc_id": "2562f7b1-a829-4c4c-b023-042610f5bd3d",
+    "file_name": "20261027_183707_Certificate.jpg",
+    "sha256": "9fd61201f0ad583583e9014f3e625e36b66ba21f544942711e1d2ce50c8f102e",
+    "content_hash": "ccf57b5924ef369f64457e2108b903f5b19d9225e8b88cec47dd47897b824c06",
+    "category": "Certificate",
+    "user_name": "MAHIMA MEGHANA PATOJU",
+    "uploaded_at": "2026-10-27T18:37:07.971647",
+    "folder": "/Certificates/2026",
+    "status": "routed"
+  },
+  {
+    "doc_id": "3276651e-4838-4ba3-b56c-ac6add38679e",
+    "file_name": "20261027_183710_23WH1A66_students.xlsx",
+    "sha256": "8152273449a2978bc77453efd5772af39a927bc61a5a3af3b5bbcf727d25a46f",
+    "content_hash": "73178f95309ce65f1b3ed465a39d4ec6b91195a81944ba1607257d0be39fb415",
+    "category": "Data",
+    "user_name": "MAHIMA MEGHANA PATOJU",
+    "uploaded_at": "2026-10-27T18:37:10.602663",
+    "folder": "/Needs_Review/Quarantine",
+    "status": "review"
+  }
+]

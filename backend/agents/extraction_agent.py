@@ -38,6 +38,9 @@ class EntityExtractionAgent(BaseAgent):
         elif category == "Transcript":
             entities = self._extract_transcript_entities(text, filename)
             summary = f"Academic Transcript for {entities.get('student_name', 'Student')} (GPA: {entities.get('gpa', 'N/A')})."
+        elif category == "Data":
+            entities = self._extract_data_entities(text, filename)
+            summary = f"Dataset: {entities.get('dataset_title', 'Tabular Data')} ({entities.get('record_count', 0)} rows, {entities.get('columns', 'columns')[:40]}…)."
         else:
             entities = self._extract_report_entities(text, filename)
             summary = f"Document Analysis Report on {entities.get('title', filename)}."
@@ -143,6 +146,55 @@ class EntityExtractionAgent(BaseAgent):
             "degree": "Master of Science in Computer Science",
         }
 
+    def _extract_data_entities(self, text: str, filename: str) -> Dict[str, Any]:
+        sheets = re.findall(r"Sheet:\s*([^\n]+)", text)
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+
+        # Identify header row with pipe or delimiter
+        columns: List[str] = []
+        data_rows: List[str] = []
+        header_found = False
+
+        for line in lines:
+            if line.startswith("Sheet:"):
+                continue
+            if "|" in line:
+                parts = [p.strip() for p in line.split("|") if p.strip()]
+                if not header_found and len(parts) >= 2:
+                    columns = parts
+                    header_found = True
+                else:
+                    data_rows.append(line)
+
+        record_count = len(data_rows) if data_rows else max(1, len(lines) - 2)
+
+        # Domain inference
+        lower_all = (filename + " " + text).lower()
+        if "faculty" in lower_all:
+            domain = "Faculty Academic & Professional Activities"
+        elif "student" in lower_all or "roll no" in lower_all:
+            domain = "Student Academic Enrollment & Performance Roster"
+        elif "invoice" in lower_all or "sales" in lower_all:
+            domain = "Commercial & Transactional Records"
+        elif "attendance" in lower_all:
+            domain = "Attendance & Participation Tracking"
+        else:
+            clean_name = re.sub(r"^\d+_\d+_", "", filename)
+            clean_name = re.sub(r"\.(xlsx|xls|csv|tsv)$", "", clean_name, flags=re.IGNORECASE).replace("_", " ").title()
+            domain = f"{clean_name} Tabular Dataset"
+
+        col_str = ", ".join(columns[:8]) if columns else "Structured Tabular Columns"
+
+        return {
+            "dataset_title": domain,
+            "columns": col_str,
+            "record_count": record_count,
+            "sheet_count": max(1, len(sheets)),
+            "primary_sheet": sheets[0] if sheets else "DataSheet",
+            "data_format": "Excel Workbook / Tabular Dataset",
+            "extracted_at": datetime.now().strftime("%Y-%m-%d"),
+        }
+
     def _extract_report_entities(self, text: str, filename: str) -> Dict[str, Any]:
         return {
             "title": filename.replace("_", " ").replace(".txt", "").replace(".pdf", ""),
@@ -202,6 +254,15 @@ class EntityExtractionAgent(BaseAgent):
             if not entities.get("gpa"):
                 gpa_cand = re.search(r"\b([3-4]\.[0-9]{1,2})\b", text)
                 entities["gpa"] = gpa_cand.group(1) if gpa_cand else "3.80"
+                corrected_fields += 1
+
+        # Heuristic 5: If columns or record count missing in Data
+        if category == "Data":
+            if not entities.get("columns"):
+                entities["columns"] = "Attributes, Metrics, Identifiers"
+                corrected_fields += 1
+            if not entities.get("record_count") or entities.get("record_count") == 0:
+                entities["record_count"] = max(1, text.count("\n"))
                 corrected_fields += 1
 
         self.log(f"Self-correction completed: refined {corrected_fields} field(s)", "ok" if corrected_fields > 0 else "info")

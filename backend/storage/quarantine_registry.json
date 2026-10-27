@@ -1,0 +1,28 @@
+[
+  {
+    "doc_id": "3aeeb4cd-d4d4-490f-8ad8-0ea4cc9cfc39",
+    "file_name": "20261027_183703_sample_faculty_activity_data.xlsx",
+    "category": "Data",
+    "user_name": "MAHIMA MEGHANA PATOJU",
+    "sha256": "acc5363fe020b1c61b8f65ef4d7e090a1608f35f751358c4babb1683ce78e211",
+    "quarantined_at": "2026-10-27T18:37:03.765201",
+    "reason": "DUPLICATE_DOCUMENT",
+    "folder": "/Needs_Review/Quarantine",
+    "risk_score": 45.0,
+    "details": "Exact binary duplicate of '20261027_181843_sample_faculty_activity_data.xlsx' uploaded on 2026-10-27.",
+    "status": "quarantined"
+  },
+  {
+    "doc_id": "3276651e-4838-4ba3-b56c-ac6add38679e",
+    "file_name": "20261027_183710_23WH1A66_students.xlsx",
+    "category": "Data",
+    "user_name": "MAHIMA MEGHANA PATOJU",
+    "sha256": "8152273449a2978bc77453efd5772af39a927bc61a5a3af3b5bbcf727d25a46f",
+    "quarantined_at": "2026-10-27T18:37:10.616398",
+    "reason": "DUPLICATE_DOCUMENT",
+    "folder": "/Needs_Review/Quarantine",
+    "risk_score": 45.0,
+    "details": "Exact binary duplicate of '20261027_181853_23WH1A66_students.xlsx' uploaded on 2026-10-27.",
+    "status": "quarantined"
+  }
+]

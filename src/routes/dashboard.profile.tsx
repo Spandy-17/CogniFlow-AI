@@ -140,7 +140,7 @@ function ProfilePage() {
         ...draft,
         fullName: draft.fullName.trim(),
         role: draft.role.trim() || "Team Member",
-        email: draft.email.trim() || DEFAULT_PROFILE.email,
+        email: draft.email.trim() || user?.email || profile.email || "",
         location: draft.location.trim() || "Remote",
         bio: draft.bio.trim(),
       };

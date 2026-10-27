@@ -205,13 +205,52 @@ async function updateProcessingFields(
   return data;
 }
 
+/** Check if a document with this filename has already been uploaded to the database. */
+export async function checkExistingDocument(filename: string): Promise<DocumentRecord | null> {
+  const cleanName = filename.trim();
+  try {
+    const { data, error } = await supabase
+      .from("documents")
+      .select("*")
+      .ilike("name", cleanName)
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return mapDatabaseDocument(data);
+  } catch {
+    return null;
+  }
+}
+
 /** Save a user upload and its metadata. AI processing is started separately. */
 export async function saveUploadedDocument(
   file: File,
   user: User | null,
-  onProgress?: (stage: string, progressPercent: number) => void
+  onProgress?: (stage: string, progressPercent: number) => void,
+  allowOverwrite = false
 ): Promise<DocumentRecord> {
   const currentUser = user || await getCurrentUser();
+
+  onProgress?.("Checking for duplicate uploads…", 5);
+
+  // Pre-upload verification: Block duplicate file uploads unless overwrite is requested
+  const existing = await checkExistingDocument(file.name);
+  if (existing && !allowOverwrite) {
+    const destination =
+      existing.folder && existing.folder !== "Unassigned"
+        ? `already filed in ${existing.folder}`
+        : `already saved with status "${existing.status}"`;
+    throw new Error(
+      `File already exists: "${file.name}" has already been uploaded (${destination}). Duplicate upload blocked.`
+    );
+  }
+
+  if (existing && allowOverwrite) {
+    onProgress?.("Removing previous version…", 8);
+    await deleteDocument(existing.id, existing.filePath);
+  }
+
   const storagePath = `${currentUser.id}/${crypto.randomUUID()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
 
   onProgress?.("Uploading original file…", 10);
@@ -288,6 +327,7 @@ export async function processSavedDocument(doc: DocumentRecord): Promise<Documen
   formData.append("file", upload);
   formData.append("user_name", userName);
   formData.append("user_id", currentUser.id);
+  formData.append("allow_duplicate", "true");
 
   await updateProcessingFields(currentUser.id, {
     id: doc.id,
