@@ -119,5 +119,16 @@
     "uploaded_at": "2026-10-27T18:37:10.602663",
     "folder": "/Needs_Review/Quarantine",
     "status": "review"
+  },
+  {
+    "doc_id": "18ee2dd5-fa10-41de-b270-10d0cd73a107",
+    "file_name": "20261105_205631_sample_faculty_activity_data.xlsx",
+    "sha256": "acc5363fe020b1c61b8f65ef4d7e090a1608f35f751358c4babb1683ce78e211",
+    "content_hash": "b1dc25bcb882ede01ba448755356979d39ae7aa306d4e7f2db469968fb13bce2",
+    "category": "Data",
+    "user_name": "SPANDANA SIDDULA",
+    "uploaded_at": "2026-11-05T20:56:32.298575",
+    "folder": "/Needs_Review/Quarantine",
+    "status": "review"
   }
 ]
