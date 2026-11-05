@@ -24,5 +24,18 @@
     "risk_score": 45.0,
     "details": "Exact binary duplicate of '20261027_181853_23WH1A66_students.xlsx' uploaded on 2026-10-27.",
     "status": "quarantined"
+  },
+  {
+    "doc_id": "18ee2dd5-fa10-41de-b270-10d0cd73a107",
+    "file_name": "20261105_205631_sample_faculty_activity_data.xlsx",
+    "category": "Data",
+    "user_name": "SPANDANA SIDDULA",
+    "sha256": "acc5363fe020b1c61b8f65ef4d7e090a1608f35f751358c4babb1683ce78e211",
+    "quarantined_at": "2026-11-05T20:56:32.306938",
+    "reason": "DUPLICATE_DOCUMENT",
+    "folder": "/Needs_Review/Quarantine",
+    "risk_score": 45.0,
+    "details": "Exact binary duplicate of '20261027_181843_sample_faculty_activity_data.xlsx' uploaded on 2026-10-27.",
+    "status": "quarantined"
   }
 ]
