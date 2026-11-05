@@ -1,8 +1,13 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Base backend directory
 BASE_DIR = Path(__file__).resolve().parent
+
+# Load environment variables from workspace root .env if present
+load_dotenv(BASE_DIR.parent / ".env")
+
 
 # Storage directories
 STORAGE_DIR = BASE_DIR / "storage"
